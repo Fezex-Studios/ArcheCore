@@ -1,9 +1,10 @@
 {
   "version": 2,
-  "dgSpecHash": "CjhMx4bosRU=",
+  "dgSpecHash": "JnPYMyZX4ss=",
   "success": true,
   "projectFilePath": "F:\\Development\\ProjectArcheCore\\ArcheCore\\ArcheCore.Net\\ArcheCore.Net.csproj",
   "expectedPackageFiles": [
+    "C:\\Users\\aidan\\.nuget\\packages\\litenetlib\\2.1.4\\litenetlib.2.1.4.nupkg.sha512",
     "C:\\Users\\aidan\\.nuget\\packages\\messagepack\\3.1.7\\messagepack.3.1.7.nupkg.sha512",
     "C:\\Users\\aidan\\.nuget\\packages\\messagepack.annotations\\3.1.7\\messagepack.annotations.3.1.7.nupkg.sha512",
     "C:\\Users\\aidan\\.nuget\\packages\\messagepackanalyzer\\3.1.7\\messagepackanalyzer.3.1.7.nupkg.sha512",

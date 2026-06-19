@@ -51,6 +51,10 @@
         "netstandard2.1": {
           "targetAlias": "netstandard2.1",
           "dependencies": {
+            "LiteNetLib": {
+              "target": "Package",
+              "version": "[2.1.4, )"
+            },
             "MessagePack": {
               "target": "Package",
               "version": "[3.1.7, )"

@@ -2,6 +2,19 @@
   "version": 3,
   "targets": {
     ".NETStandard,Version=v2.1": {
+      "LiteNetLib/2.1.4": {
+        "type": "package",
+        "compile": {
+          "lib/netstandard2.1/LiteNetLib.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/netstandard2.1/LiteNetLib.dll": {
+            "related": ".xml"
+          }
+        }
+      },
       "MessagePack/3.1.7": {
         "type": "package",
         "dependencies": {
@@ -134,6 +147,23 @@
     }
   },
   "libraries": {
+    "LiteNetLib/2.1.4": {
+      "sha512": "KWlxvMw3Urpqj9joD96LRiK+LC62pQNs/zkXRJc+rHnxgkGp+vV703xzDrxRmv+V1YhCFfIGzs5nrVWtREIlyA==",
+      "type": "package",
+      "path": "litenetlib/2.1.4",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "LNL.png",
+        "README.md",
+        "lib/net8.0/LiteNetLib.dll",
+        "lib/net8.0/LiteNetLib.xml",
+        "lib/netstandard2.1/LiteNetLib.dll",
+        "lib/netstandard2.1/LiteNetLib.xml",
+        "litenetlib.2.1.4.nupkg.sha512",
+        "litenetlib.nuspec"
+      ]
+    },
     "MessagePack/3.1.7": {
       "sha512": "gXpifaxbhfBqh8bVToQn9j+OgCnhXWMbRCV7RQIbCVa9CNJG1fY6oHAYYl+ER3Tb9uUIHiQ5QbGiGwwFhoagbA==",
       "type": "package",
@@ -366,6 +396,7 @@
   },
   "projectFileDependencyGroups": {
     ".NETStandard,Version=v2.1": [
+      "LiteNetLib >= 2.1.4",
       "MessagePack >= 3.1.7"
     ]
   },
@@ -420,6 +451,10 @@
       "netstandard2.1": {
         "targetAlias": "netstandard2.1",
         "dependencies": {
+          "LiteNetLib": {
+            "target": "Package",
+            "version": "[2.1.4, )"
+          },
           "MessagePack": {
             "target": "Package",
             "version": "[3.1.7, )"
