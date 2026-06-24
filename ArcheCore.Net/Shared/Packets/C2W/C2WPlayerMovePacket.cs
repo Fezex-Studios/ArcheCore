@@ -1,6 +1,6 @@
 ﻿using MessagePack;
 
-namespace MMO.Shared.Packets
+namespace ArcheCore.Net.Shared.Packets.C2W
 {
     [MessagePackObject(true)]
     public class C2WPlayerMovePacket

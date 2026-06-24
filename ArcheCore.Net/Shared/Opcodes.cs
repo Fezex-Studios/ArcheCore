@@ -1,4 +1,4 @@
-﻿namespace ArcheCore.Net.Worldserver
+﻿namespace ArcheCore.Library.Net.Worldserver
 {
     public enum Opcodes :ushort
     {

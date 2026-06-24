@@ -1,7 +1,10 @@
 ﻿using MessagePack;
 
-[MessagePackObject(true)]
-public class P2WConnectResponse
+namespace ArcheCore.Net.Shared.Packets.PersistenceServer.P2W
 {
-    public string Message;
+    [MessagePackObject(true)]
+    public class P2WConnectResponse
+    {
+        public string Message;
+    }
 }

@@ -1,18 +1,25 @@
 ﻿using MessagePack;
 
-[MessagePackObject(true)]
-public class P2WCharacterLoadResponse
+
+
+namespace ArcheCore.Net.Shared.Packets.PersistenceServer.P2W
 {
-    public bool Found;
-    public long CharacterId;
+    
+    [MessagePackObject(true)]
+    public class P2WCharacterLoadResponse
+    {
+        public bool Found;
+        public long CharacterId;
 
-    public string Name;
+        public string Name;
 
-    public int Level;
+        public int Level;
 
-    public float X;
+        public float X;
 
-    public float Y;
+        public float Y;
 
-    public float Z;
+        public float Z;
+    }
 }
+

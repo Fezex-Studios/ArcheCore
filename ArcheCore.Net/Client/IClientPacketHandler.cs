@@ -1,7 +1,7 @@
 ﻿using LiteNetLib;
 using LiteNetLib.Utils;
 
-namespace ArcheCore.Client.Networking
+namespace ArcheCore.Net.Client
 {
     public interface IClientPacketHandler
     {

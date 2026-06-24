@@ -1,7 +1,12 @@
 ﻿using MessagePack;
 
-[MessagePackObject(true)]
-public class W2PCharacterLoadRequest
+
+
+namespace ArcheCore.Net.Shared.Packets.PersistenceServer.W2P
 {
-    public long CharacterId;
+    [MessagePackObject(true)]
+    public class W2PCharacterLoadRequest
+    {
+        public long CharacterId;
+    }
 }

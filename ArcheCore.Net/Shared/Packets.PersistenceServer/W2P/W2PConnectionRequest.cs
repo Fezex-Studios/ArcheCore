@@ -1,6 +1,6 @@
 using MessagePack;
 
-namespace ArcheCore.WorldServer.PersistenceServer.Packets
+namespace ArcheCore.Net.Shared.Packets.PersistenceServer.W2P
 {   
     
     [MessagePackObject(true)]

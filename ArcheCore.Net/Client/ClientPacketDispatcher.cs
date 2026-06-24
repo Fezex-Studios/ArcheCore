@@ -1,10 +1,10 @@
 ﻿using System.Collections.Generic;
-using ArcheCore.Net.Worldserver;
+using ArcheCore.Library.Net.Worldserver;
 using LiteNetLib;
 
 
 
-namespace ArcheCore.Client.Networking
+namespace ArcheCore.Net.Client
 {
     public class PacketDispatcher
     {

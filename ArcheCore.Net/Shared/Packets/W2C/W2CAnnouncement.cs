@@ -1,6 +1,6 @@
 using MessagePack;
 
-namespace Shared.Packets
+namespace ArcheCore.Net.Shared.Packets.W2C
 {
     [MessagePackObject(true)]
     public class W2CAnnouncement

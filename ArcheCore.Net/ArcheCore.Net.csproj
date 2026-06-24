@@ -4,6 +4,7 @@
         <TargetFramework>netstandard2.1</TargetFramework>
         <Nullable>enable</Nullable>
         <LangVersion>9.0</LangVersion>
+        <RootNamespace>ArcheCore.Net</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>
@@ -12,7 +13,6 @@
     </ItemGroup>
 
     <ItemGroup>
-        <Folder Include="PersistenceServer\" />
         <Folder Include="Worldserver\" />
     </ItemGroup>
 
