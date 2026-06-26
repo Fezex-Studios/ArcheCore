@@ -21,7 +21,6 @@
     <ItemGroup>
       <Folder Include="Core\Lua\DeveloperSDK\" />
       <Folder Include="Core\Network\" />
-      <Folder Include="Core\Packets\W2CSenders\" />
       <Folder Include="Physics\" />
       <Folder Include="Services\" />
       <Folder Include="Utils\Database\MySQL\" />
