@@ -1,4 +1,8 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿using ArcheCore.Worldserver.Core.Managers;
+using ArcheCore.Worldserver.Core.Services;
+using ArcheCore.Worldserver.Utils.Config;
+using ArcheCore.Worldserver.Utils.Database.SQLite;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
@@ -11,13 +15,15 @@ public class WorldServer : IHostedService
     private readonly QuestManager _questManager;
     private readonly NetworkConfig _network;
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly DemoService _demoService;
 
     public WorldServer(
         ILogger<WorldServer> logger,
         IOptions<WorldServerConfig> world,
         IServiceScopeFactory scopeFactory,
         IOptions<NetworkConfig> network,
-        QuestManager questManager
+        QuestManager questManager,
+        DemoService demoService
         )
     {
         _logger = logger;
@@ -25,9 +31,10 @@ public class WorldServer : IHostedService
         _network = network.Value;
         _questManager = questManager;
         _scopeFactory = scopeFactory;
+        _demoService = demoService;
     }
 
-    public Task StartAsync(CancellationToken cancellationToken)
+    public async Task StartAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation(
             "World starting | TickRate={TickRate} | MaxPlayers={MaxPlayers}",
@@ -39,17 +46,13 @@ public class WorldServer : IHostedService
             _network.Port
             );
         using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<ContentDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<WorldDataDbContext>();
         db.Database.EnsureCreated();
         var quests = db.Quests.ToList();
         _questManager.Load(quests);
 
         _logger.LogInformation("Loaded {Count} quests from SQLite", quests.Count);
-        
-        
-        
-        
-        return Task.CompletedTask;
+        await _demoService.RunService();
     }
 
     public Task StopAsync(CancellationToken cancellationToken)

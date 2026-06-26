@@ -1,4 +1,8 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using ArcheCore.Worldserver.Core.Managers;
+using ArcheCore.Worldserver.Core.Services;
+using ArcheCore.Worldserver.Utils.Config;
+using ArcheCore.Worldserver.Utils.Database.SQLite;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -6,7 +10,7 @@ using NLog.Extensions.Logging;
 
 namespace ArcheCore.Worldserver;
 
-public class ServerBootStrap
+public static class ServerBootStrap
 {
     public static IHostBuilder UseWorldServer(this IHostBuilder builder)
     {
@@ -23,7 +27,7 @@ public class ServerBootStrap
 
         builder.ConfigureServices((context, services) =>
         {
-            services.AddDbContext<ContentDbContext>(options =>
+            services.AddDbContext<WorldDataDbContext>(options =>
             {
                 options.UseSqlite("Data Source=worldserver.db");
                 options.UseLoggerFactory(LoggerFactory.Create(b => b.AddFilter(_ => false))); // silence EF entirely
@@ -45,7 +49,7 @@ public class ServerBootStrap
                 context.Configuration.GetSection("Database"));
 
             services.AddHostedService<WorldServer>();
-            services.AddSingleton<PlayerService>();
+            services.AddSingleton<DemoService>();
         });
 
         return builder;

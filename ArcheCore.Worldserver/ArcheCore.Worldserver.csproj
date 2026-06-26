@@ -18,13 +18,12 @@
     </ItemGroup>
 
     <ItemGroup>
-      <Folder Include="Core\Managers\" />
       <Folder Include="Core\Network\" />
       <Folder Include="Core\Packets\C2WHandlers\" />
       <Folder Include="Core\Packets\W2C\" />
-      <Folder Include="GameData\" />
       <Folder Include="Physics\" />
       <Folder Include="Services\" />
+      <Folder Include="Utils\Database\MySQL\" />
     </ItemGroup>
 
 </Project>
