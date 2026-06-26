@@ -1,1 +1,6 @@
-﻿Console.WriteLine("Hello, World!");
+﻿namespace ArcheCore.Worldserver;
+
+public class Program
+{
+    
+}
