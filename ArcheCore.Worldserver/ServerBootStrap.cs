@@ -52,7 +52,7 @@ public static class ServerBootStrap
             services.Configure<DatabaseConfig>(
                 context.Configuration.GetSection("Database"));
 
-            services.AddHostedService<WorldServer>();
+            services.AddHostedService<global::WorldServer>();
             services.AddSingleton<DemoService>();
         });
 

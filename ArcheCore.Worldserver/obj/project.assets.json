@@ -1115,6 +1115,20 @@
         "build": {
           "buildTransitive/net10.0/System.Text.Json.targets": {}
         }
+      },
+      "ArcheCore.Net/1.0.0": {
+        "type": "project",
+        "framework": ".NETStandard,Version=v2.1",
+        "dependencies": {
+          "LiteNetLib": "2.1.4",
+          "MessagePack": "3.1.7"
+        },
+        "compile": {
+          "bin/placeholder/ArcheCore.Net.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/ArcheCore.Net.dll": {}
+        }
       }
     }
   },
@@ -2587,10 +2601,16 @@
         "system.text.json.nuspec",
         "useSharedDesignerContext.txt"
       ]
+    },
+    "ArcheCore.Net/1.0.0": {
+      "type": "project",
+      "path": "../ArcheCore.Net/ArcheCore.Net.csproj",
+      "msbuildProject": "../ArcheCore.Net/ArcheCore.Net.csproj"
     }
   },
   "projectFileDependencyGroups": {
     "net10.0": [
+      "ArcheCore.Net >= 1.0.0",
       "LiteNetLib >= 2.1.4",
       "MessagePack >= 3.1.7",
       "Microsoft.EntityFrameworkCore.Sqlite >= 9.0.0",
@@ -2632,7 +2652,11 @@
       "frameworks": {
         "net10.0": {
           "targetAlias": "net10.0",
-          "projectReferences": {}
+          "projectReferences": {
+            "F:\\Development\\ProjectArcheCore\\ArcheCore\\ArcheCore.Net\\ArcheCore.Net.csproj": {
+              "projectPath": "F:\\Development\\ProjectArcheCore\\ArcheCore\\ArcheCore.Net\\ArcheCore.Net.csproj"
+            }
+          }
         }
       },
       "warningProperties": {

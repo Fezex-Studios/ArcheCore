@@ -1,19 +1,14 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
+using System.Numerics;
 using System.Threading.Tasks;
+using ArcheCore.Net.Shared.Packets.PersistenceServer.P2W;
 using ArcheCore.WorldServer;
-using ArcheCore.WorldServer.Lua.Scripting;
-using ArcheCore.WorldServer.Lua.Scripting.Bindings;
-using ArcheCore.WorldServer.Networking.W2C;
-using ArcheCore.WorldServer.PersistenceServer;
-using ArcheCore.WorldServer.ServerConfig;
 using LiteNetLib;
-using Shared;
-using Shared.Components;
-using UnityEngine;
-using Worldserver.ArcheCore.PersistenceServer.Scripts;
+
 
 namespace ArcheCore.WorldServer.Managers
 {
