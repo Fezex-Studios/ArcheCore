@@ -1,19 +1,22 @@
-﻿using ArcheCore.Worldserver.Core.Managers;
-using ArcheCore.Worldserver.Core.Services;
+﻿using ArcheCore.Worldserver.Core.Services;
 using ArcheCore.Worldserver.Utils.Config;
 using ArcheCore.Worldserver.Utils.Database.SQLite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using NLog.Extensions.Logging;
 
 namespace ArcheCore.Worldserver;
 
 public static class ServerBootStrap
 {
+    
     public static IHostBuilder UseWorldServer(this IHostBuilder builder)
+    
     {
+        
         builder.ConfigureLogging(logging =>
         {
             
@@ -27,9 +30,10 @@ public static class ServerBootStrap
 
         builder.ConfigureServices((context, services) =>
         {
-            services.AddDbContext<WorldDataDbContext>(options =>
+            services.AddDbContext<WorldDataDbContext>((sp,options) =>
             {
-                options.UseSqlite("Data Source=worldserver.db");
+                var dbConfig = sp.GetRequiredService<IOptions<DatabaseConfig>>().Value;
+                options.UseSqlite($"Data Source={dbConfig.WorldDb}");
                 options.UseLoggerFactory(LoggerFactory.Create(b => b.AddFilter(_ => false))); // silence EF entirely
                 options.EnableSensitiveDataLogging(false);
             });

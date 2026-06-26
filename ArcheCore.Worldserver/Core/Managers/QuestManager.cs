@@ -1,20 +1,36 @@
 ﻿using ArcheCore.Worldserver.GameData.Quests;
-
-namespace ArcheCore.Worldserver.Core.Managers;
+using ArcheCore.Worldserver.Utils.Database.SQLite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 public class QuestManager
 {
-    private List<QuestTable> _quests = new();
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ILogger<QuestManager> _logger;
 
-    public IReadOnlyList<QuestTable> Quests => _quests;
+    public QuestManager(IServiceScopeFactory scopeFactory, ILogger<QuestManager> logger)
+    {
+        _scopeFactory = scopeFactory;
+        _logger = logger;
+    }
+
+    public void LoadFromDatabase()
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<WorldDataDbContext>();
+
+        db.Database.Migrate();
+
+        var quests = db.Quests.ToList();
+
+        Load(quests);
+
+        _logger.LogInformation("Loaded {Count} quests from SQLite", quests.Count);
+    }
 
     public void Load(List<QuestTable> quests)
     {
-        _quests = quests;
-    }
-
-    public QuestTable? Get(int id)
-    {
-        return _quests.FirstOrDefault(q => q.Id == id);
+        // in-memory processing only
     }
 }

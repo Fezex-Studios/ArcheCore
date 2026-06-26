@@ -1,0 +1,11 @@
+F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Net\bin\Debug\netstandard2.1\ArcheCore.Net.deps.json
+F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Net\bin\Debug\netstandard2.1\ArcheCore.Net.dll
+F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Net\bin\Debug\netstandard2.1\ArcheCore.Net.pdb
+F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Net\obj\Debug\netstandard2.1\ArcheCore.Net.csproj.AssemblyReference.cache
+F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Net\obj\Debug\netstandard2.1\ArcheCore.Net.GeneratedMSBuildEditorConfig.editorconfig
+F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Net\obj\Debug\netstandard2.1\ArcheCore.Net.AssemblyInfoInputs.cache
+F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Net\obj\Debug\netstandard2.1\ArcheCore.Net.AssemblyInfo.cs
+F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Net\obj\Debug\netstandard2.1\ArcheCore.Net.csproj.CoreCompileInputs.cache
+F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Net\obj\Debug\netstandard2.1\ArcheCore.Net.sourcelink.json
+F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Net\obj\Debug\netstandard2.1\ArcheCore.Net.dll
+F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Net\obj\Debug\netstandard2.1\ArcheCore.Net.pdb
