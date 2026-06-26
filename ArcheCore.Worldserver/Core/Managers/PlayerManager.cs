@@ -7,6 +7,8 @@ using System.Numerics;
 using System.Threading.Tasks;
 using ArcheCore.Net.Shared.Packets.PersistenceServer.P2W;
 using ArcheCore.WorldServer;
+using ArcheCore.WorldServer.Lua.Scripting;
+using ArcheCore.WorldServer.Lua.Scripting.Bindings;
 using LiteNetLib;
 
 

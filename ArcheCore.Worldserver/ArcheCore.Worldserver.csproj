@@ -12,6 +12,7 @@
       <PackageReference Include="MessagePack" Version="3.1.7" />
       <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="9.0.0" />
       <PackageReference Include="Microsoft.Extensions.Hosting" Version="11.0.0-preview.5.26302.115" />
+      <PackageReference Include="MoonSharp" Version="2.0.0" />
       <PackageReference Include="NLog" Version="6.1.3" />
       <PackageReference Include="NLog.Extensions.Logging" Version="6.1.3" />
       <PackageReference Include="Pomelo.EntityFrameworkCore.MySql" Version="9.0.0" />
@@ -20,8 +21,7 @@
     <ItemGroup>
       <Folder Include="Core\Lua\DeveloperSDK\" />
       <Folder Include="Core\Network\" />
-      <Folder Include="Core\Packets\C2WHandlers\" />
-      <Folder Include="Core\Packets\W2C\" />
+      <Folder Include="Core\Packets\W2CSenders\" />
       <Folder Include="Physics\" />
       <Folder Include="Services\" />
       <Folder Include="Utils\Database\MySQL\" />

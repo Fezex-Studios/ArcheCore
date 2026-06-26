@@ -3,7 +3,6 @@ using System.IO;
 using ArcheCore.WorldServer.Lua.Scripting.Bindings;
 using MoonSharp.Interpreter;
 using MoonSharp.Interpreter.Loaders;
-using UnityEngine;
 
 namespace ArcheCore.WorldServer.Lua.Scripting
 {
