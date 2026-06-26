@@ -6,7 +6,7 @@ using LiteNetLib;
 
 namespace ArcheCore.Net.Client
 {
-    public class PacketDispatcher
+    public class ClientPacketDispatcher
     {
         private readonly Dictionary<
                 Opcodes,

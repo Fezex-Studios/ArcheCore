@@ -1,4 +1,6 @@
 ﻿using System.Collections.Generic;
+using ArcheCore.Library.Net.Worldserver;
+using ArcheCore.Net.Worldserver;
 using LiteNetLib;
 
 
@@ -7,7 +9,7 @@ namespace ArcheCore.WorldServer.Managers
     public class ReplicationManager
     {
         public void Broadcast<T>(
-            Opcode opcode,
+            Opcodes opcode,
             T payload,
             IEnumerable<NetPeer> peers)
         {
@@ -16,7 +18,7 @@ namespace ArcheCore.WorldServer.Managers
         }
 
         public void BroadcastExcept<T>(
-            Opcode opcode,
+            Opcodes opcode,
             T payload,
             IEnumerable<NetPeer> peers,
             NetPeer except)
@@ -29,7 +31,7 @@ namespace ArcheCore.WorldServer.Managers
         }
 
         public void Send<T>(
-            Opcode opcode,
+            Opcodes opcode,
             T payload,
             NetPeer peer)
         {
@@ -37,7 +39,7 @@ namespace ArcheCore.WorldServer.Managers
         }
 
         public void SendUnreliable<T>(
-            Opcode opcode,
+            Opcodes opcode,
             T payload,
             IEnumerable<NetPeer> peers,
             NetPeer except)
