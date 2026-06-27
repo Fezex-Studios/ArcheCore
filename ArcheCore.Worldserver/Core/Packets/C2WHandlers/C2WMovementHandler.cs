@@ -1,4 +1,5 @@
-﻿using System.Numerics;
+﻿
+using System.Numerics;
 using ArcheCore.Net.Shared.Packets.C2W;
 using ArcheCore.Net.Worldserver;
 using ArcheCore.WorldServer.Managers;

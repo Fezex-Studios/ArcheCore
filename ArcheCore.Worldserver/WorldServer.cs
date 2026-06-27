@@ -11,12 +11,14 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
+using NLog;
+using Shared.AuthService;
 
 
 public class WorldServer : IHostedService,INetEventListener
 {
     // Utils
-    private readonly ILogger<WorldServer> _logger;
+    private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
     private readonly WorldServerConfig _world;
     private readonly NetworkConfig _network;
     private readonly IServiceScopeFactory _scopeFactory;
@@ -33,23 +35,29 @@ public class WorldServer : IHostedService,INetEventListener
     
     // Services
     private readonly DemoService _demoService;
+    private readonly AuthService _authService;
+    
+    
+    private const string ConnectionKey = "MMO";
     
 
     public WorldServer(
-        ILogger<WorldServer> logger,
+        
         IOptions<WorldServerConfig> world,
         IServiceScopeFactory scopeFactory,
         IOptions<NetworkConfig> network,
         QuestManager questManager,
-        DemoService demoService
+        DemoService demoService,
+        AuthService authService
         )
     {
-        _logger = logger;
+       
         _world = world.Value;
         _network = network.Value;
         _questManager = questManager;
         _scopeFactory = scopeFactory;
         _demoService = demoService;
+        _authService = authService;
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -69,7 +77,7 @@ public class WorldServer : IHostedService,INetEventListener
        _server = new NetManager(this);
        _server.Start(_network.Port);
        
-       _logger.LogInformation(
+       Logger.Info(
            "World started | {Host}:{Port} | TickRate={TickRate} | MaxPlayers={MaxPlayers}",
            _network.Host, _network.Port, _world.TickRate, _world.MaxPlayers);
        
@@ -95,7 +103,7 @@ public class WorldServer : IHostedService,INetEventListener
 
     public Task StopAsync(CancellationToken cancellationToken)
     {
-        _logger.LogInformation("World stopping");
+        Logger.Info("World stopping");
         _tickCts?.Cancel();
         _server?.Stop();
         return Task.CompletedTask;
@@ -103,7 +111,7 @@ public class WorldServer : IHostedService,INetEventListener
     private void RegisterPackets()
     {
         
-        _packetDispatcher.Register(Opcodes.Authenticate, new C2WAuthenticateHandler(_playerManager));
+        _packetDispatcher.Register(Opcodes.PlayerMove,   new C2WAuthenticateHandler(_playerManager));
         _packetDispatcher.Register(Opcodes.PlayerMove,   new C2WMovementHandler(_playerManager));
     }
         
@@ -111,7 +119,7 @@ public class WorldServer : IHostedService,INetEventListener
     
     public void OnPeerConnected(NetPeer peer)
     {
-        _logger.LogInformation($"Client connected: {peer.Address}");
+        Logger.Info($"Client connected: {peer.Address}");
     }
     public void OnPeerDisconnected(NetPeer peer, DisconnectInfo info)
     {
@@ -127,15 +135,15 @@ public class WorldServer : IHostedService,INetEventListener
         byte channel,
         DeliveryMethod delivery)
     {
-        Opcode packet = (Opcode)reader.GetUShort();
-        packetDispatcher.Handle(packet, peer, reader);
+        Opcodes packet = (Opcodes)reader.GetUShort();
+        _packetDispatcher.Handle(packet, peer, reader);
         reader.Recycle();
     }
     public void OnNetworkError(
         System.Net.IPEndPoint endPoint,
         System.Net.Sockets.SocketError error)
     {
-        _logger.LogWarning($"Network Error: {error}");
+        Logger.Warn($"Network Error: {error}");
     }
     public void OnNetworkLatencyUpdate(NetPeer peer, int latency) { }
 

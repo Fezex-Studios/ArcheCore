@@ -3,16 +3,17 @@ using ArcheCore.Worldserver.Utils.Database.SQLite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using NLog;
 
 public class QuestManager
 {
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly ILogger<QuestManager> _logger;
+    private static readonly Logger  Logger = LogManager.GetCurrentClassLogger();
 
     public QuestManager(IServiceScopeFactory scopeFactory, ILogger<QuestManager> logger)
     {
         _scopeFactory = scopeFactory;
-        _logger = logger;
+        
     }
 
     public void LoadFromDatabase()
@@ -26,7 +27,7 @@ public class QuestManager
 
         Load(quests);
 
-        _logger.LogInformation("Loaded {Count} quests from SQLite", quests.Count);
+        Logger.Info("Loaded {Count} quests from SQLite", quests.Count);
     }
 
     public void Load(List<QuestTable> quests)

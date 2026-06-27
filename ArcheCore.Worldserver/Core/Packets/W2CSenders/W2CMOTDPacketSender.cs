@@ -1,7 +1,7 @@
 ﻿using System.Collections.Generic;
+using ArcheCore.Library.Net.Worldserver;
 using ArcheCore.WorldServer.Managers;
 using LiteNetLib;
-using Shared;
 using Shared.Packets;
 
 namespace ArcheCore.WorldServer.Networking.W2C
@@ -14,7 +14,7 @@ namespace ArcheCore.WorldServer.Networking.W2C
             string message)
         {
             replication.Send(
-                Opcode.MOTD,
+                Opcodes.MOTD,
                 new W2CMOTDPacket { Message = message },
                 peer);
         }

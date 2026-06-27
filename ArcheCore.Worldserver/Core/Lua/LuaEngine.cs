@@ -1,8 +1,11 @@
 ﻿using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using ArcheCore.WorldServer.Lua.Scripting.Bindings;
+using Microsoft.Extensions.Logging;
 using MoonSharp.Interpreter;
 using MoonSharp.Interpreter.Loaders;
+using NLog;
 
 namespace ArcheCore.WorldServer.Lua.Scripting
 {
@@ -17,6 +20,7 @@ namespace ArcheCore.WorldServer.Lua.Scripting
     {
         private readonly Script script;
         private readonly LuaServerBinding serverBinding;
+        private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
         private readonly Dictionary<PlayerEvent, List<Closure>> hooks = new();
 
@@ -52,7 +56,7 @@ namespace ArcheCore.WorldServer.Lua.Scripting
         {
             if (!Directory.Exists(directory))
             {
-                Debug.LogWarning($"[LuaEngine] Script directory not found: {directory}");
+                Logger.Warn($"[LuaEngine] Script directory not found: {directory}");
                 return;
             }
 
@@ -63,19 +67,19 @@ namespace ArcheCore.WorldServer.Lua.Scripting
                 try
                 {
                     script.DoFile(path);
-                    WorldLogger.Info($"[LuaEngine] Loaded script: {path}");
+                    Logger.Info($"[LuaEngine] Loaded script: {path}");
                 }
                 catch (ScriptRuntimeException e)
                 {
-                    Debug.LogError($"[LuaEngine] Runtime error loading {path}: {e.DecoratedMessage}");
+                    Logger.Error($"[LuaEngine] Runtime error loading {path}: {e.DecoratedMessage}");
                 }
                 catch (SyntaxErrorException e)
                 {
-                    Debug.LogError($"[LuaEngine] Syntax error in {path}: {e.DecoratedMessage}");
+                    Logger.Error($"[LuaEngine] Syntax error in {path}: {e.DecoratedMessage}");
                 }
             }
 
-            WorldLogger.Info($"[LuaEngine] Loaded {files.Length} script(s) from {directory}");
+           Logger.Info($"[LuaEngine] Loaded {files.Length} script(s) from {directory}");
         }
 
         /// <summary>
@@ -112,7 +116,7 @@ namespace ArcheCore.WorldServer.Lua.Scripting
                 }
                 catch (ScriptRuntimeException e)
                 {
-                    Debug.LogError($"[LuaEngine] Error in {evt} hook: {e.DecoratedMessage}");
+                    Logger.Error($"[LuaEngine] Error in {evt} hook: {e.DecoratedMessage}");
                 }
             }
         }
@@ -130,7 +134,7 @@ namespace ArcheCore.WorldServer.Lua.Scripting
 
             if (fn.Type != DataType.Function)
             {
-                Debug.LogWarning(
+                Logger.Warn(
                     $"[LuaEngine] Function not found: {functionName}");
                 return;
             }
@@ -141,7 +145,7 @@ namespace ArcheCore.WorldServer.Lua.Scripting
             }
             catch (ScriptRuntimeException e)
             {
-                Debug.LogError(
+                Logger.Error(
                     $"[LuaEngine] Error calling {functionName}: {e.DecoratedMessage}");
             }
         }

@@ -75,3 +75,5 @@
 2026-06-26 09:15:15.5929 [INFO] [Microsoft.Hosting.Lifetime] Application started. Press Ctrl+C to shut down. 
 2026-06-26 09:15:15.5929 [INFO] [Microsoft.Hosting.Lifetime] Hosting environment: Production 
 2026-06-26 09:15:15.5929 [INFO] [Microsoft.Hosting.Lifetime] Content root path: F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\bin\Debug\net10.0 
+2026-06-26 09:58:03.4406 [INFO] [Microsoft.Hosting.Lifetime] Application is shutting down... 
+2026-06-26 09:58:03.4406 [INFO] [WorldServer] World stopping 

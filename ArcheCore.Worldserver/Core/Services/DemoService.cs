@@ -1,18 +1,19 @@
 ﻿using Microsoft.Extensions.Logging;
+using NLog;
 
 namespace ArcheCore.Worldserver.Core.Services;
 
 public class DemoService
 {
-    private readonly ILogger<DemoService> _logger;
-    public DemoService(ILogger<DemoService> logger)
+    private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
+    public DemoService()
     {
-        _logger = logger;
+       
     }
 
     public Task RunService()
     {
-        _logger.LogInformation("Started DemoService!");
+        Logger.Info("Started DemoService!");
         return Task.CompletedTask;
     }
 }

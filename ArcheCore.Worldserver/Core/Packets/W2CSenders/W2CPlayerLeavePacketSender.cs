@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using ArcheCore.Library.Net.Worldserver;
 using ArcheCore.WorldServer.Managers;
 using LiteNetLib;
 using Shared;
@@ -14,7 +15,7 @@ namespace ArcheCore.WorldServer.Networking.W2C
             int networkId)
         {
             replication.Broadcast(
-                Opcode.PlayerLeave,
+                Opcodes.PlayerLeave,
                 new W2CPlayerLeavePacket { NetworkId = networkId },
                 peers);
         }

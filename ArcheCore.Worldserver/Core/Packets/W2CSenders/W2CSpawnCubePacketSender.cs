@@ -1,8 +1,10 @@
 ﻿using System.Collections.Generic;
+using System.Numerics;
+using ArcheCore.Library.Net.Worldserver;
+using ArcheCore.Net.Shared.Packets.W2C;
 using ArcheCore.WorldServer.Managers;
 using LiteNetLib;
 using Shared;
-using Shared.Components;
 
 namespace ArcheCore.WorldServer.Networking.W2C
 {
@@ -12,11 +14,17 @@ namespace ArcheCore.WorldServer.Networking.W2C
             ReplicationManager replication,
             NetPeer peer,
             int cubeId,
-            float x, float y, float z)
+            Vector3 position)
         {
             replication.Send(
-                Opcode.SpawnCube,
-                new W2CSpawnCubePacket { CubeId = cubeId, x = x, y = y, z = z },
+                Opcodes.SpawnCube,
+                new W2CSpawnCubePacket
+                {
+                    CubeId = cubeId,
+                    x = position.X,
+                    y = position.Y,
+                    z = position.Z
+                },
                 peer);
         }
 
@@ -24,11 +32,17 @@ namespace ArcheCore.WorldServer.Networking.W2C
             ReplicationManager replication,
             IEnumerable<NetPeer> peers,
             int cubeId,
-            float x, float y, float z)
+            Vector3 position)
         {
             replication.Broadcast(
-                Opcode.SpawnCube,
-                new W2CSpawnCubePacket { CubeId = cubeId, x = x, y = y, z = z },
+                Opcodes.SpawnCube,
+                new W2CSpawnCubePacket
+                {
+                    CubeId = cubeId,
+                    x = position.X,
+                    y = position.Y,
+                    z = position.Z
+                },
                 peers);
         }
     }

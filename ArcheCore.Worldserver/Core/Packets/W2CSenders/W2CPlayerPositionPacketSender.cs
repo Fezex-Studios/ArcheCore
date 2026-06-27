@@ -1,9 +1,11 @@
 ﻿using System.Collections.Generic;
+using System.Numerics;
+using ArcheCore.Library.Net.Worldserver;
 using ArcheCore.WorldServer.Managers;
 using LiteNetLib;
 using Shared;
 using Shared.Components;
-using UnityEngine;
+
 
 namespace ArcheCore.WorldServer.Networking.W2C
 {
@@ -17,13 +19,13 @@ namespace ArcheCore.WorldServer.Networking.W2C
             Vector3 position)
         {
             replication.SendUnreliable(
-                Opcode.PlayerPosition,
+                Opcodes.PlayerPosition,
                 new W2CPlayerPositionPacket
                 {
                     NetworkId = networkId,
-                    x         = position.x,
-                    y         = position.y,
-                    z         = position.z
+                    x         = position.X,
+                    y         = position.Y,
+                    z         = position.Z
                 },
                 peers,
                 except);

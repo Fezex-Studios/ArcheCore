@@ -1,8 +1,9 @@
-﻿using ArcheCore.WorldServer.Managers;
+﻿using System.Numerics;
 using LiteNetLib;
+using ArcheCore.Library.Net.Worldserver;
+using ArcheCore.WorldServer.Managers;
 using Shared;
 using Shared.Components;
-using UnityEngine;
 
 namespace ArcheCore.WorldServer.Networking.W2C
 {
@@ -16,13 +17,13 @@ namespace ArcheCore.WorldServer.Networking.W2C
             bool isLocalPlayer)
         {
             replication.Send(
-                Opcode.SpawnPlayer,
+                Opcodes.SpawnPlayer,
                 new W2CSpawnPlayerPacket
                 {
                     NetworkId     = networkId,
-                    x             = position.x,
-                    y             = position.y,
-                    z             = position.z,
+                    x             = position.X,
+                    y             = position.Y,
+                    z             = position.Z,
                     IsLocalPlayer = isLocalPlayer
                 },
                 peer);
