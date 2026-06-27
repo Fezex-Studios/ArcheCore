@@ -77,3 +77,106 @@
 2026-06-26 09:15:15.5929 [INFO] [Microsoft.Hosting.Lifetime] Content root path: F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\bin\Debug\net10.0 
 2026-06-26 09:58:03.4406 [INFO] [Microsoft.Hosting.Lifetime] Application is shutting down... 
 2026-06-26 09:58:03.4406 [INFO] [WorldServer] World stopping 
+2026-06-26 21:56:28.7569 [ERROR] [Microsoft.Extensions.Hosting.Internal.Host] Hosting failed to start System.InvalidOperationException: Unable to resolve service for type 'System.Net.Http.HttpClient' while attempting to activate 'Shared.AuthService.AuthService'.
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.CreateArgumentCallSites(ServiceIdentifier serviceIdentifier, Type implementationType, CallSiteChain callSiteChain, ParameterInfo[] parameters, Boolean throwIfCallSiteNotFound)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.CreateConstructorCallSite(ResultCache lifetime, ServiceIdentifier serviceIdentifier, Type implementationType, CallSiteChain callSiteChain)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.CreateExact(ServiceDescriptor descriptor, ServiceIdentifier serviceIdentifier, CallSiteChain callSiteChain, Int32 slot)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.TryCreateExact(ServiceDescriptor descriptor, ServiceIdentifier serviceIdentifier, CallSiteChain callSiteChain, Int32 slot)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.TryCreateExact(ServiceIdentifier serviceIdentifier, CallSiteChain callSiteChain)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.CreateCallSite(ServiceIdentifier serviceIdentifier, CallSiteChain callSiteChain)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.GetCallSite(ServiceIdentifier serviceIdentifier, CallSiteChain callSiteChain)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.CreateArgumentCallSites(ServiceIdentifier serviceIdentifier, Type implementationType, CallSiteChain callSiteChain, ParameterInfo[] parameters, Boolean throwIfCallSiteNotFound)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.CreateConstructorCallSite(ResultCache lifetime, ServiceIdentifier serviceIdentifier, Type implementationType, CallSiteChain callSiteChain)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.CreateExact(ServiceDescriptor descriptor, ServiceIdentifier serviceIdentifier, CallSiteChain callSiteChain, Int32 slot)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.TryCreateEnumerable(ServiceIdentifier serviceIdentifier, CallSiteChain callSiteChain)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.CreateCallSite(ServiceIdentifier serviceIdentifier, CallSiteChain callSiteChain)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.GetCallSite(ServiceIdentifier serviceIdentifier, CallSiteChain callSiteChain)
+   at Microsoft.Extensions.DependencyInjection.ServiceProvider.CreateServiceAccessor(ServiceIdentifier serviceIdentifier)
+   at System.Collections.Concurrent.ConcurrentDictionary`2.GetOrAdd(TKey key, Func`2 valueFactory)
+   at Microsoft.Extensions.DependencyInjection.ServiceProvider.GetService(ServiceIdentifier serviceIdentifier, ServiceProviderEngineScope serviceProviderEngineScope)
+   at Microsoft.Extensions.DependencyInjection.ServiceProvider.GetService(Type serviceType)
+   at Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService(IServiceProvider provider, Type serviceType)
+   at Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService[T](IServiceProvider provider)
+   at Microsoft.Extensions.Hosting.Internal.Host.StartAsync(CancellationToken cancellationToken)
+2026-06-26 22:46:17.9656 [ERROR] [Microsoft.Extensions.Hosting.Internal.Host] Hosting failed to start System.InvalidOperationException: Unable to resolve service for type 'System.Net.Http.HttpClient' while attempting to activate 'Shared.AuthService.AuthService'.
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.CreateArgumentCallSites(ServiceIdentifier serviceIdentifier, Type implementationType, CallSiteChain callSiteChain, ParameterInfo[] parameters, Boolean throwIfCallSiteNotFound)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.CreateConstructorCallSite(ResultCache lifetime, ServiceIdentifier serviceIdentifier, Type implementationType, CallSiteChain callSiteChain)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.CreateExact(ServiceDescriptor descriptor, ServiceIdentifier serviceIdentifier, CallSiteChain callSiteChain, Int32 slot)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.TryCreateExact(ServiceDescriptor descriptor, ServiceIdentifier serviceIdentifier, CallSiteChain callSiteChain, Int32 slot)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.TryCreateExact(ServiceIdentifier serviceIdentifier, CallSiteChain callSiteChain)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.CreateCallSite(ServiceIdentifier serviceIdentifier, CallSiteChain callSiteChain)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.GetCallSite(ServiceIdentifier serviceIdentifier, CallSiteChain callSiteChain)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.CreateArgumentCallSites(ServiceIdentifier serviceIdentifier, Type implementationType, CallSiteChain callSiteChain, ParameterInfo[] parameters, Boolean throwIfCallSiteNotFound)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.CreateConstructorCallSite(ResultCache lifetime, ServiceIdentifier serviceIdentifier, Type implementationType, CallSiteChain callSiteChain)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.CreateExact(ServiceDescriptor descriptor, ServiceIdentifier serviceIdentifier, CallSiteChain callSiteChain, Int32 slot)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.TryCreateEnumerable(ServiceIdentifier serviceIdentifier, CallSiteChain callSiteChain)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.CreateCallSite(ServiceIdentifier serviceIdentifier, CallSiteChain callSiteChain)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.GetCallSite(ServiceIdentifier serviceIdentifier, CallSiteChain callSiteChain)
+   at Microsoft.Extensions.DependencyInjection.ServiceProvider.CreateServiceAccessor(ServiceIdentifier serviceIdentifier)
+   at System.Collections.Concurrent.ConcurrentDictionary`2.GetOrAdd(TKey key, Func`2 valueFactory)
+   at Microsoft.Extensions.DependencyInjection.ServiceProvider.GetService(ServiceIdentifier serviceIdentifier, ServiceProviderEngineScope serviceProviderEngineScope)
+   at Microsoft.Extensions.DependencyInjection.ServiceProvider.GetService(Type serviceType)
+   at Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService(IServiceProvider provider, Type serviceType)
+   at Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService[T](IServiceProvider provider)
+   at Microsoft.Extensions.Hosting.Internal.Host.StartAsync(CancellationToken cancellationToken)
+2026-06-26 23:32:03.2000 [ERROR] [Microsoft.Extensions.Hosting.Internal.Host] Hosting failed to start System.InvalidOperationException: Unable to resolve service for type 'System.Net.Http.IHttpClientFactory' while attempting to activate 'ArcheCore.Worldserver.Core.Services.Authservice.AuthService'.
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.CreateArgumentCallSites(ServiceIdentifier serviceIdentifier, Type implementationType, CallSiteChain callSiteChain, ParameterInfo[] parameters, Boolean throwIfCallSiteNotFound)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.CreateConstructorCallSite(ResultCache lifetime, ServiceIdentifier serviceIdentifier, Type implementationType, CallSiteChain callSiteChain)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.CreateExact(ServiceDescriptor descriptor, ServiceIdentifier serviceIdentifier, CallSiteChain callSiteChain, Int32 slot)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.TryCreateExact(ServiceDescriptor descriptor, ServiceIdentifier serviceIdentifier, CallSiteChain callSiteChain, Int32 slot)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.TryCreateExact(ServiceIdentifier serviceIdentifier, CallSiteChain callSiteChain)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.CreateCallSite(ServiceIdentifier serviceIdentifier, CallSiteChain callSiteChain)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.GetCallSite(ServiceIdentifier serviceIdentifier, CallSiteChain callSiteChain)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.CreateArgumentCallSites(ServiceIdentifier serviceIdentifier, Type implementationType, CallSiteChain callSiteChain, ParameterInfo[] parameters, Boolean throwIfCallSiteNotFound)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.CreateConstructorCallSite(ResultCache lifetime, ServiceIdentifier serviceIdentifier, Type implementationType, CallSiteChain callSiteChain)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.CreateExact(ServiceDescriptor descriptor, ServiceIdentifier serviceIdentifier, CallSiteChain callSiteChain, Int32 slot)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.TryCreateEnumerable(ServiceIdentifier serviceIdentifier, CallSiteChain callSiteChain)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.CreateCallSite(ServiceIdentifier serviceIdentifier, CallSiteChain callSiteChain)
+   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteFactory.GetCallSite(ServiceIdentifier serviceIdentifier, CallSiteChain callSiteChain)
+   at Microsoft.Extensions.DependencyInjection.ServiceProvider.CreateServiceAccessor(ServiceIdentifier serviceIdentifier)
+   at System.Collections.Concurrent.ConcurrentDictionary`2.GetOrAdd(TKey key, Func`2 valueFactory)
+   at Microsoft.Extensions.DependencyInjection.ServiceProvider.GetService(ServiceIdentifier serviceIdentifier, ServiceProviderEngineScope serviceProviderEngineScope)
+   at Microsoft.Extensions.DependencyInjection.ServiceProvider.GetService(Type serviceType)
+   at Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService(IServiceProvider provider, Type serviceType)
+   at Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService[T](IServiceProvider provider)
+   at Microsoft.Extensions.Hosting.Internal.Host.StartAsync(CancellationToken cancellationToken)
+2026-06-26 23:32:43.7122 [WARN] [ArcheCore.WorldServer.Lua.Scripting.LuaEngine] [LuaEngine] Script directory not found: F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\bin\Debug\net10.0\Lua\Server 
+2026-06-26 23:32:43.7616 [INFO] [ArcheCore.WorldServer.Managers.SpawnManager] Spawned 5 cubes. 
+2026-06-26 23:32:45.6571 [ERROR] [Microsoft.Extensions.Hosting.Internal.Host] Hosting failed to start System.InvalidOperationException: An error was generated for warning 'Microsoft.EntityFrameworkCore.Migrations.PendingModelChangesWarning': The model for context 'WorldDataDbContext' has pending changes. Add a new migration before updating the database. This exception can be suppressed or logged by passing event ID 'RelationalEventId.PendingModelChangesWarning' to the 'ConfigureWarnings' method in 'DbContext.OnConfiguring' or 'AddDbContext'.
+   at Microsoft.EntityFrameworkCore.Diagnostics.EventDefinition`1.Log[TLoggerCategory](IDiagnosticsLogger`1 logger, TParam arg)
+   at Microsoft.EntityFrameworkCore.Diagnostics.RelationalLoggerExtensions.PendingModelChangesWarning(IDiagnosticsLogger`1 diagnostics, Type contextType)
+   at Microsoft.EntityFrameworkCore.Migrations.Internal.Migrator.Migrate(String targetMigration)
+   at Microsoft.EntityFrameworkCore.RelationalDatabaseFacadeExtensions.Migrate(DatabaseFacade databaseFacade)
+   at QuestManager.LoadFromDatabase() in F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\Core\Managers\QuestManager.cs:line 24
+   at ArcheCore.Worldserver.WorldServer.StartAsync(CancellationToken cancellationToken) in F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\Core\WorldServer.cs:line 72
+   at Microsoft.Extensions.Hosting.Internal.Host.<StartAsync>b__16_1(IHostedService service, CancellationToken token)
+   at Microsoft.Extensions.Hosting.Internal.Host.ForeachService[T](IEnumerable`1 services, CancellationToken token, Boolean concurrent, Boolean abortOnFirstException, List`1 exceptions, Func`3 operation)
+2026-06-26 23:51:47.1156 [WARN] [ArcheCore.WorldServer.Lua.Scripting.LuaEngine] [LuaEngine] Script directory not found: F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\bin\Debug\net10.0\Lua\Server 
+2026-06-26 23:51:47.1927 [INFO] [ArcheCore.WorldServer.Managers.SpawnManager] Spawned 5 cubes. 
+2026-06-26 23:51:49.0886 [INFO] [ArcheCore.Worldserver.QuestManager] Loaded 0 quests from SQLite 
+2026-06-26 23:51:49.1448 [INFO] [ArcheCore.Worldserver.WorldServer] World started | localhost:1234 | TickRate=20 | MaxPlayers=500 
+2026-06-26 23:51:49.1448 [INFO] [ArcheCore.Worldserver.Core.Services.DemoService] Started DemoService! 
+2026-06-26 23:51:49.1448 [INFO] [Microsoft.Hosting.Lifetime] Application started. Press Ctrl+C to shut down. 
+2026-06-26 23:51:49.1644 [INFO] [Microsoft.Hosting.Lifetime] Hosting environment: Production 
+2026-06-26 23:51:49.1644 [INFO] [Microsoft.Hosting.Lifetime] Content root path: F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\bin\Debug\net10.0 
+2026-06-26 23:53:04.6516 [INFO] [Microsoft.Hosting.Lifetime] Application is shutting down... 
+2026-06-26 23:53:04.6516 [INFO] [ArcheCore.Worldserver.WorldServer] World stopping 
+2026-06-26 23:54:52.8286 [WARN] [ArcheCore.WorldServer.Lua.Scripting.LuaEngine] [LuaEngine] Script directory not found: F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\bin\Debug\net10.0\Lua\Server 
+2026-06-26 23:54:52.9061 [INFO] [ArcheCore.WorldServer.Managers.SpawnManager] Spawned 5 cubes. 
+2026-06-26 23:54:55.1229 [INFO] [ArcheCore.Worldserver.QuestManager] Loaded 0 quests from SQLite 
+2026-06-26 23:54:55.1675 [INFO] [ArcheCore.Worldserver.WorldServer] World started | localhost:1234 | TickRate=20 | MaxPlayers=500 
+2026-06-26 23:54:55.1675 [INFO] [ArcheCore.Worldserver.Core.Services.DemoService] Started DemoService! 
+2026-06-26 23:54:55.1795 [INFO] [Microsoft.Hosting.Lifetime] Application started. Press Ctrl+C to shut down. 
+2026-06-26 23:54:55.1795 [INFO] [Microsoft.Hosting.Lifetime] Hosting environment: Production 
+2026-06-26 23:54:55.1899 [INFO] [Microsoft.Hosting.Lifetime] Content root path: F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\bin\Debug\net10.0 
+2026-06-26 23:54:57.1948 [INFO] [Microsoft.Hosting.Lifetime] Application is shutting down... 
+2026-06-26 23:54:57.1948 [INFO] [ArcheCore.Worldserver.WorldServer] World stopping 
+2026-06-26 23:56:44.3604 [WARN] [ArcheCore.WorldServer.Lua.Scripting.LuaEngine] [LuaEngine] Script directory not found: F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\bin\Debug\net10.0\Lua\Server 
+2026-06-26 23:56:44.4283 [INFO] [ArcheCore.WorldServer.Managers.SpawnManager] Spawned 5 cubes. 
+2026-06-26 23:56:45.6382 [INFO] [ArcheCore.Worldserver.QuestManager] Loaded 0 quests from SQLite 
+2026-06-26 23:56:45.6809 [INFO] [ArcheCore.Worldserver.WorldServer] World started | localhost:7777 | TickRate=20 | MaxPlayers=500 
+2026-06-26 23:56:45.6809 [INFO] [ArcheCore.Worldserver.Core.Services.DemoService] Started DemoService! 
+2026-06-26 23:56:45.6899 [INFO] [Microsoft.Hosting.Lifetime] Application started. Press Ctrl+C to shut down. 
+2026-06-26 23:56:45.6899 [INFO] [Microsoft.Hosting.Lifetime] Hosting environment: Production 
+2026-06-26 23:56:45.6899 [INFO] [Microsoft.Hosting.Lifetime] Content root path: F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\bin\Debug\net10.0 
+2026-06-26 23:57:46.1127 [INFO] [ArcheCore.Worldserver.WorldServer] Client connected: 127.0.0.1 

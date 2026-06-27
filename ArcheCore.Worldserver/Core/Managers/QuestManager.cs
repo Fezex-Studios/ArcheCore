@@ -20,8 +20,7 @@ public class QuestManager
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<WorldDataDbContext>();
-
-        db.Database.Migrate();
+        
 
         var quests = db.Quests.ToList();
 

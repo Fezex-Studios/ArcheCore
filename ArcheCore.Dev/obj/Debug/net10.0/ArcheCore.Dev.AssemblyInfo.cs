@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("ArcheCore.Dev")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+53a301e98cd44d51ec950aaeb5ddf4f0ad397487")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+c95238d26a8566d9deb72c5b73252152ac9a2887")]
 [assembly: System.Reflection.AssemblyProductAttribute("ArcheCore.Dev")]
 [assembly: System.Reflection.AssemblyTitleAttribute("ArcheCore.Dev")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

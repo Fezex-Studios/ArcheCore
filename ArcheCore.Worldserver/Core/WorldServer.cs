@@ -2,6 +2,7 @@
 using ArcheCore.Net.Client;
 using ArcheCore.Net.Worldserver;
 using ArcheCore.Worldserver.Core.Services;
+using ArcheCore.Worldserver.Core.Services.Authservice;
 using ArcheCore.WorldServer.Managers;
 using ArcheCore.WorldServer.Networking.C2W;
 using ArcheCore.Worldserver.Utils.Config;
@@ -13,8 +14,9 @@ using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
 using NLog;
 using Shared.AuthService;
+using Worldserver.ArcheCore.PersistenceServer.Scripts;
 
-
+namespace ArcheCore.Worldserver;
 public class WorldServer : IHostedService,INetEventListener
 {
     // Utils
@@ -62,29 +64,38 @@ public class WorldServer : IHostedService,INetEventListener
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        // Managers
+        // 1. Connect to PersistenceServer first — other systems depend on it
+        var persistenceClient = new PersistenceClient(_world);
+        await persistenceClient.Start();
+
+        // 2. Initialize managers
         _replicationManager = new ReplicationManager();
         _spawnManager = new SpawnManager(_replicationManager);
-        _playerManager = new PlayerManager(_spawnManager,_replicationManager);
+        _playerManager = new PlayerManager(_spawnManager, _replicationManager, _world);
         _playerManager.InitializeScripts();
+
+        // 3. Load game data
+        _questManager.LoadFromDatabase();
+
+        // 4. Register packets
+        _packetDispatcher = new PacketDispatcher();
+        RegisterPackets();
+
+        // 5. Start network — only now can clients connect
+        _server = new NetManager(this);
+        _server.Start(_network.Port);
+
+        Logger.Info(
+            "World started | {Host}:{Port} | TickRate={TickRate} | MaxPlayers={MaxPlayers}",
+            _network.Host, _network.Port, _world.TickRate, _world.MaxPlayers);
+
+        // 6. Spawn world objects — server is running, replication is ready
         _spawnManager.SpawnInitialCubes();
-       _questManager.LoadFromDatabase();
 
-
-       _packetDispatcher = new PacketDispatcher();
-       RegisterPackets();
-
-       _server = new NetManager(this);
-       _server.Start(_network.Port);
-       
-       Logger.Info(
-           "World started | {Host}:{Port} | TickRate={TickRate} | MaxPlayers={MaxPlayers}",
-           _network.Host, _network.Port, _world.TickRate, _world.MaxPlayers);
-       
-       // Services
+        // 7. Services
         await _demoService.RunService();
-        
-        // Tick Loop
+
+        // 8. Start tick loop last
         _tickCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _ = RunTickLoopAsync(_tickCts.Token);
     }
@@ -111,7 +122,7 @@ public class WorldServer : IHostedService,INetEventListener
     private void RegisterPackets()
     {
         
-        _packetDispatcher.Register(Opcodes.PlayerMove,   new C2WAuthenticateHandler(_playerManager));
+        _packetDispatcher.Register(Opcodes.Authenticate, new C2WAuthenticateHandler(_playerManager, _authService));
         _packetDispatcher.Register(Opcodes.PlayerMove,   new C2WMovementHandler(_playerManager));
     }
         

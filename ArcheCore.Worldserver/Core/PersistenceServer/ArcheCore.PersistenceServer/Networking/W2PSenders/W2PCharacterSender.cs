@@ -1,4 +1,5 @@
 ﻿using System.Threading.Tasks;
+using ArcheCore.Net.PersistenceServer;
 using ArcheCore.Net.Shared.Packets.PersistenceServer.P2W;
 using ArcheCore.Net.Shared.Packets.PersistenceServer.W2P;
 using Worldserver.ArcheCore.PersistenceServer.Scripts;
@@ -19,7 +20,7 @@ namespace ArcheCore.WorldServer.PersistenceServer.Senders
 
             _client.pendingLoads[characterId] = tcs;
 
-            await _client.Send(PersistenceOpcode.CharacterLoad, new W2PCharacterLoadRequest
+            await _client.Send(PServerOpcodes.CharacterLoad, new W2PCharacterLoadRequest
             {
                 CharacterId = characterId
             });
@@ -29,7 +30,7 @@ namespace ArcheCore.WorldServer.PersistenceServer.Senders
 
         public async Task Save(long characterId, string name, int level, float x, float y, float z)
         {
-            await _client.Send(PersistenceOpcode.CharacterSave, new W2PCharacterSaveRequest
+            await _client.Send(PServerOpcodes.CharacterSave, new W2PCharacterSaveRequest
             {
                 CharacterId = characterId,
                 Name        = name,

@@ -7,5 +7,5 @@ public class WorldServerConfig
     public String MOTD { get; set; } = String.Empty;
     public String AuthServerUrl { get; set; } = String.Empty;
     public String InternalSecret { get; set; } = String.Empty;
-    public String PersistencePort  { get; set; } = String.Empty;
+    public int PersistencePort  { get; set; } 
 }

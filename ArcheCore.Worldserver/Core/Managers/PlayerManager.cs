@@ -44,11 +44,12 @@ namespace ArcheCore.WorldServer.Managers
 
         public PlayerManager(
             SpawnManager spawnManager,
-            ReplicationManager replication
-            )
+            ReplicationManager replication,
+            WorldServerConfig worldConfig)
         {
             _spawnManager = spawnManager;
             _replication = replication;
+            _worldConfig = worldConfig;
         }
 
         public void DrainActions()

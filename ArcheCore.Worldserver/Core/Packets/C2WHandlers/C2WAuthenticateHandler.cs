@@ -2,6 +2,7 @@
 using ArcheCore.Net.Shared.Packets.C2W;
 using ArcheCore.Net.Shared.Packets.PersistenceServer.P2W;
 using ArcheCore.Net.Worldserver;
+using ArcheCore.Worldserver.Core.Services.Authservice;
 using ArcheCore.WorldServer.Managers;
 using LiteNetLib;
 using MessagePack;
@@ -16,12 +17,13 @@ namespace ArcheCore.WorldServer.Networking.C2W
     {
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
         private readonly PlayerManager playerManager;
+        private readonly AuthService authService; 
 
 
-        public C2WAuthenticateHandler(PlayerManager playerManager)
+        public C2WAuthenticateHandler(PlayerManager playerManager, AuthService authService)
         {
-            
             this.playerManager = playerManager;
+            this.authService = authService;  // was assigning null before
         }
 
         public void Handle(
@@ -40,7 +42,7 @@ namespace ArcheCore.WorldServer.Networking.C2W
 
         private async Task ValidateAndConnect(NetPeer peer, string token)
         {
-            int accountId = await AuthService.ValidateToken(token);
+            int accountId = await authService.ValidateToken(token);
 
             if (accountId == -1)
             {

@@ -1,0 +1,215 @@
+2026-06-27 00:10:57.2750 [INFO] [Microsoft.Hosting.Lifetime] Application is shutting down... 
+2026-06-27 00:10:57.2844 [INFO] [ArcheCore.Worldserver.WorldServer] World stopping 
+2026-06-27 00:11:06.6510 [WARN] [ArcheCore.WorldServer.Lua.Scripting.LuaEngine] [LuaEngine] Script directory not found: F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\bin\Debug\net10.0\Lua\Server 
+2026-06-27 00:11:06.6946 [INFO] [ArcheCore.WorldServer.Managers.SpawnManager] Spawned 5 cubes. 
+2026-06-27 00:11:07.9457 [INFO] [ArcheCore.Worldserver.QuestManager] Loaded 0 quests from SQLite 
+2026-06-27 00:11:10.0115 [ERROR] [Microsoft.Extensions.Hosting.Internal.Host] Hosting failed to start System.Net.Sockets.SocketException (10061): No connection could be made because the target machine actively refused it.
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.ThrowException(SocketError error, CancellationToken cancellationToken)
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.System.Threading.Tasks.Sources.IValueTaskSource.GetResult(Int16 token)
+   at System.Threading.Tasks.ValueTask.ValueTaskSourceAsTask.<>c.<.cctor>b__4_0(Object state)
+--- End of stack trace from previous location ---
+   at System.Net.Sockets.TcpClient.CompleteConnectAsync(Task task)
+   at Worldserver.ArcheCore.PersistenceServer.Scripts.PersistenceClient.Start() in F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\Core\PersistenceServer\ArcheCore.PersistenceServer\PersistenceClient.cs:line 54
+   at ArcheCore.Worldserver.WorldServer.StartAsync(CancellationToken cancellationToken) in F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\Core\WorldServer.cs:line 76
+   at Microsoft.Extensions.Hosting.Internal.Host.<StartAsync>b__16_1(IHostedService service, CancellationToken token)
+   at Microsoft.Extensions.Hosting.Internal.Host.ForeachService[T](IEnumerable`1 services, CancellationToken token, Boolean concurrent, Boolean abortOnFirstException, List`1 exceptions, Func`3 operation)
+2026-06-27 00:11:29.7602 [WARN] [ArcheCore.WorldServer.Lua.Scripting.LuaEngine] [LuaEngine] Script directory not found: F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\bin\Debug\net10.0\Lua\Server 
+2026-06-27 00:11:29.7997 [INFO] [ArcheCore.WorldServer.Managers.SpawnManager] Spawned 5 cubes. 
+2026-06-27 00:11:31.0996 [INFO] [ArcheCore.Worldserver.QuestManager] Loaded 0 quests from SQLite 
+2026-06-27 00:11:33.1690 [ERROR] [Microsoft.Extensions.Hosting.Internal.Host] Hosting failed to start System.Net.Sockets.SocketException (10061): No connection could be made because the target machine actively refused it.
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.ThrowException(SocketError error, CancellationToken cancellationToken)
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.System.Threading.Tasks.Sources.IValueTaskSource.GetResult(Int16 token)
+   at System.Threading.Tasks.ValueTask.ValueTaskSourceAsTask.<>c.<.cctor>b__4_0(Object state)
+--- End of stack trace from previous location ---
+   at System.Net.Sockets.TcpClient.CompleteConnectAsync(Task task)
+   at Worldserver.ArcheCore.PersistenceServer.Scripts.PersistenceClient.Start() in F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\Core\PersistenceServer\ArcheCore.PersistenceServer\PersistenceClient.cs:line 54
+   at ArcheCore.Worldserver.WorldServer.StartAsync(CancellationToken cancellationToken) in F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\Core\WorldServer.cs:line 76
+   at Microsoft.Extensions.Hosting.Internal.Host.<StartAsync>b__16_1(IHostedService service, CancellationToken token)
+   at Microsoft.Extensions.Hosting.Internal.Host.ForeachService[T](IEnumerable`1 services, CancellationToken token, Boolean concurrent, Boolean abortOnFirstException, List`1 exceptions, Func`3 operation)
+2026-06-27 00:12:02.1107 [WARN] [ArcheCore.WorldServer.Lua.Scripting.LuaEngine] [LuaEngine] Script directory not found: F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\bin\Debug\net10.0\Lua\Server 
+2026-06-27 00:12:02.1435 [INFO] [ArcheCore.WorldServer.Managers.SpawnManager] Spawned 5 cubes. 
+2026-06-27 00:12:03.2287 [INFO] [ArcheCore.Worldserver.QuestManager] Loaded 0 quests from SQLite 
+2026-06-27 00:12:04.5379 [INFO] [Worldserver.ArcheCore.PersistenceServer.Scripts.PersistenceClient] [World] Sent W2PConnectRequest 
+2026-06-27 00:12:04.5379 [INFO] [Worldserver.ArcheCore.PersistenceServer.Scripts.PersistenceClient] [World] Sent HelloWorld 
+2026-06-27 00:12:04.5554 [INFO] [ArcheCore.Worldserver.WorldServer] World started | localhost:7777 | TickRate=20 | MaxPlayers=500 
+2026-06-27 00:12:04.5554 [INFO] [ArcheCore.Worldserver.Core.Services.DemoService] Started DemoService! 
+2026-06-27 00:12:04.5554 [INFO] [Worldserver.ArcheCore.PersistenceServer.Scripts.PersistenceClient] [World] Received P2WConnectResponse 
+2026-06-27 00:12:04.5657 [INFO] [ArcheCore.WorldServer.PersistenceServer.Networking.P2W.P2WConnectResponseHandler] Connected to Persistence Server 
+2026-06-27 00:12:04.5657 [INFO] [Microsoft.Hosting.Lifetime] Application started. Press Ctrl+C to shut down. 
+2026-06-27 00:12:04.5657 [INFO] [Microsoft.Hosting.Lifetime] Hosting environment: Production 
+2026-06-27 00:12:04.5657 [INFO] [Microsoft.Hosting.Lifetime] Content root path: F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\bin\Debug\net10.0 
+2026-06-27 00:14:52.4965 [INFO] [ArcheCore.Worldserver.WorldServer] Client connected: 127.0.0.1 
+2026-06-27 00:14:52.4965 [WARN] [ArcheCore.WorldServer.Networking.C2W.C2WAuthenticateHandler] Auth Token:  
+2026-06-27 00:14:52.7800 [INFO] [System.Net.Http.HttpClient.Default.LogicalHandler] Start processing HTTP request POST http://127.0.0.1:3000/validate-session 
+2026-06-27 00:14:52.7800 [INFO] [System.Net.Http.HttpClient.Default.ClientHandler] Sending HTTP request POST http://127.0.0.1:3000/validate-session 
+2026-06-27 00:14:54.9126 [INFO] [System.Net.Http.HttpClient.Default.ClientHandler] HTTP request failed after 2120.4539ms System.Net.Http.HttpRequestException: No connection could be made because the target machine actively refused it. (127.0.0.1:3000)
+ ---> System.Net.Sockets.SocketException (10061): No connection could be made because the target machine actively refused it.
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.ThrowException(SocketError error, CancellationToken cancellationToken)
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.System.Threading.Tasks.Sources.IValueTaskSource.GetResult(Int16 token)
+   at System.Net.Http.HttpConnectionPool.ConnectToTcpHostAsync(String host, Int32 port, HttpRequestMessage initialRequest, Boolean async, CancellationToken cancellationToken)
+   --- End of inner exception stack trace ---
+   at System.Net.Http.HttpConnectionPool.ConnectToTcpHostAsync(String host, Int32 port, HttpRequestMessage initialRequest, Boolean async, CancellationToken cancellationToken)
+   at System.Net.Http.HttpConnectionPool.ConnectAsync(HttpRequestMessage request, Boolean async, CancellationToken cancellationToken)
+   at System.Net.Http.HttpConnectionPool.CreateHttp11ConnectionAsync(HttpRequestMessage request, Boolean async, CancellationToken cancellationToken)
+   at System.Net.Http.HttpConnectionPool.InjectNewHttp11ConnectionAsync(QueueItem queueItem)
+   at System.Threading.Tasks.TaskCompletionSourceWithCancellation`1.WaitWithCancellationAsync(CancellationToken cancellationToken)
+   at System.Net.Http.HttpConnectionPool.SendWithVersionDetectionAndRetryAsync(HttpRequestMessage request, Boolean async, Boolean doRequestAuth, CancellationToken cancellationToken)
+   at System.Net.Http.RedirectHandler.SendAsync(HttpRequestMessage request, Boolean async, CancellationToken cancellationToken)
+   at System.Net.Http.SocketsHttpHandler.<SendAsync>g__CreateHandlerAndSendAsync|115_0(HttpRequestMessage request, CancellationToken cancellationToken)
+   at Microsoft.Extensions.Http.Logging.LoggingHttpMessageHandler.<SendCoreAsync>g__Core|4_0(HttpRequestMessage request, Boolean useAsync, CancellationToken cancellationToken)
+2026-06-27 00:14:54.9553 [INFO] [System.Net.Http.HttpClient.Default.LogicalHandler] HTTP request failed after 2187.9009ms System.Net.Http.HttpRequestException: No connection could be made because the target machine actively refused it. (127.0.0.1:3000)
+ ---> System.Net.Sockets.SocketException (10061): No connection could be made because the target machine actively refused it.
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.ThrowException(SocketError error, CancellationToken cancellationToken)
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.System.Threading.Tasks.Sources.IValueTaskSource.GetResult(Int16 token)
+   at System.Net.Http.HttpConnectionPool.ConnectToTcpHostAsync(String host, Int32 port, HttpRequestMessage initialRequest, Boolean async, CancellationToken cancellationToken)
+   --- End of inner exception stack trace ---
+   at System.Net.Http.HttpConnectionPool.ConnectToTcpHostAsync(String host, Int32 port, HttpRequestMessage initialRequest, Boolean async, CancellationToken cancellationToken)
+   at System.Net.Http.HttpConnectionPool.ConnectAsync(HttpRequestMessage request, Boolean async, CancellationToken cancellationToken)
+   at System.Net.Http.HttpConnectionPool.CreateHttp11ConnectionAsync(HttpRequestMessage request, Boolean async, CancellationToken cancellationToken)
+   at System.Net.Http.HttpConnectionPool.InjectNewHttp11ConnectionAsync(QueueItem queueItem)
+   at System.Threading.Tasks.TaskCompletionSourceWithCancellation`1.WaitWithCancellationAsync(CancellationToken cancellationToken)
+   at System.Net.Http.HttpConnectionPool.SendWithVersionDetectionAndRetryAsync(HttpRequestMessage request, Boolean async, Boolean doRequestAuth, CancellationToken cancellationToken)
+   at System.Net.Http.RedirectHandler.SendAsync(HttpRequestMessage request, Boolean async, CancellationToken cancellationToken)
+   at System.Net.Http.SocketsHttpHandler.<SendAsync>g__CreateHandlerAndSendAsync|115_0(HttpRequestMessage request, CancellationToken cancellationToken)
+   at Microsoft.Extensions.Http.Logging.LoggingHttpMessageHandler.<SendCoreAsync>g__Core|4_0(HttpRequestMessage request, Boolean useAsync, CancellationToken cancellationToken)
+   at Microsoft.Extensions.Http.Logging.LoggingScopeHttpMessageHandler.<SendCoreAsync>g__Core|4_0(HttpRequestMessage request, Boolean useAsync, CancellationToken cancellationToken)
+2026-06-27 00:14:54.9746 [ERROR] [ArcheCore.Worldserver.Core.Services.Authservice.AuthService] [AuthService] Validation request failed: No connection could be made because the target machine actively refused it. (127.0.0.1:3000) 
+2026-06-27 00:14:54.9746 [WARN] [ArcheCore.WorldServer.Networking.C2W.C2WAuthenticateHandler] [C2WAuthenticateHandler] Invalid or expired token — disconnecting peer 127.0.0.1 
+2026-06-27 00:20:21.3919 [INFO] [ArcheCore.Worldserver.WorldServer] Client connected: 127.0.0.1 
+2026-06-27 00:20:21.3943 [WARN] [ArcheCore.WorldServer.Networking.C2W.C2WAuthenticateHandler] Auth Token: d1a2f3ef-3d3e-499c-9fa1-005f798bf0dd 
+2026-06-27 00:20:21.3943 [INFO] [System.Net.Http.HttpClient.Default.LogicalHandler] Start processing HTTP request POST http://127.0.0.1:3000/validate-session 
+2026-06-27 00:20:21.3943 [INFO] [System.Net.Http.HttpClient.Default.ClientHandler] Sending HTTP request POST http://127.0.0.1:3000/validate-session 
+2026-06-27 00:20:21.4343 [INFO] [System.Net.Http.HttpClient.Default.ClientHandler] Received HTTP response headers after 26.0675ms - 200 
+2026-06-27 00:20:21.4343 [INFO] [System.Net.Http.HttpClient.Default.LogicalHandler] End processing HTTP request after 34.5907ms - 200 
+2026-06-27 00:20:21.4992 [INFO] [ArcheCore.WorldServer.Networking.C2W.C2WAuthenticateHandler] [C2WAuthenticateHandler] Token valid. AccountId=1 — loading character. 
+2026-06-27 00:20:21.5060 [INFO] [Worldserver.ArcheCore.PersistenceServer.Scripts.PersistenceClient] [World] Sent CharacterLoad 
+2026-06-27 00:20:21.5060 [INFO] [Worldserver.ArcheCore.PersistenceServer.Scripts.PersistenceClient] [World] Received CharacterLoad 
+2026-06-27 00:20:21.5255 [INFO] [ArcheCore.WorldServer.PersistenceServer.Networking.P2W.P2WCharacterLoadHandler] [CharacterLoadHandler] Loaded CharacterId=1 Name=Moonsight Level=0 Pos=(3.1187434, 2.08, 0.020194024) 
+2026-06-27 00:20:21.5255 [INFO] [ArcheCore.WorldServer.Networking.C2W.C2WAuthenticateHandler] [C2WAuthenticateHandler] Character loaded: Moonsight — spawning. 
+2026-06-27 00:20:21.5555 [ERROR] [ArcheCore.WorldServer.Managers.PlayerManager] System.NullReferenceException: Object reference not set to an instance of an object. System.NullReferenceException: Object reference not set to an instance of an object.
+   at ArcheCore.WorldServer.Managers.PlayerManager.HandlePlayerConnected(NetPeer peer, Int32 accountId, P2WCharacterLoadResponse character) in F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\Core\Managers\PlayerManager.cs:line 95
+   at ArcheCore.WorldServer.Networking.C2W.C2WAuthenticateHandler.<>c__DisplayClass5_0.<ValidateAndConnect>b__3() in F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\Core\Packets\C2WHandlers\C2WAuthenticateHandler.cs:line 87
+   at ArcheCore.WorldServer.Managers.PlayerManager.DrainActions() in F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\Core\Managers\PlayerManager.cs:line 60
+2026-06-27 00:22:00.3318 [INFO] [Microsoft.Hosting.Lifetime] Application is shutting down... 
+2026-06-27 00:22:00.3318 [INFO] [ArcheCore.Worldserver.WorldServer] World stopping 
+2026-06-27 00:23:19.9740 [WARN] [ArcheCore.WorldServer.Lua.Scripting.LuaEngine] [LuaEngine] Script directory not found: F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\bin\Debug\net10.0\Lua\Server 
+2026-06-27 00:23:20.0270 [INFO] [ArcheCore.WorldServer.Managers.SpawnManager] Spawned 5 cubes. 
+2026-06-27 00:23:21.4627 [INFO] [ArcheCore.Worldserver.QuestManager] Loaded 0 quests from SQLite 
+2026-06-27 00:23:21.5859 [INFO] [Worldserver.ArcheCore.PersistenceServer.Scripts.PersistenceClient] [World] Sent W2PConnectRequest 
+2026-06-27 00:23:21.5859 [INFO] [Worldserver.ArcheCore.PersistenceServer.Scripts.PersistenceClient] [World] Sent HelloWorld 
+2026-06-27 00:23:21.6031 [INFO] [Worldserver.ArcheCore.PersistenceServer.Scripts.PersistenceClient] [World] Received P2WConnectResponse 
+2026-06-27 00:23:21.6031 [INFO] [ArcheCore.Worldserver.WorldServer] World started | localhost:7777 | TickRate=20 | MaxPlayers=500 
+2026-06-27 00:23:21.6031 [INFO] [ArcheCore.Worldserver.Core.Services.DemoService] Started DemoService! 
+2026-06-27 00:23:21.6031 [INFO] [ArcheCore.WorldServer.PersistenceServer.Networking.P2W.P2WConnectResponseHandler] Connected to Persistence Server 
+2026-06-27 00:23:21.6188 [INFO] [Microsoft.Hosting.Lifetime] Application started. Press Ctrl+C to shut down. 
+2026-06-27 00:23:21.6188 [INFO] [Microsoft.Hosting.Lifetime] Hosting environment: Production 
+2026-06-27 00:23:21.6188 [INFO] [Microsoft.Hosting.Lifetime] Content root path: F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\bin\Debug\net10.0 
+2026-06-27 00:24:28.0608 [INFO] [ArcheCore.Worldserver.WorldServer] Client connected: 127.0.0.1 
+2026-06-27 00:24:28.0649 [WARN] [ArcheCore.WorldServer.Networking.C2W.C2WAuthenticateHandler] Auth Token: d1a2f3ef-3d3e-499c-9fa1-005f798bf0dd 
+2026-06-27 00:24:28.2013 [INFO] [System.Net.Http.HttpClient.Default.LogicalHandler] Start processing HTTP request POST http://127.0.0.1:3000/validate-session 
+2026-06-27 00:24:28.2013 [INFO] [System.Net.Http.HttpClient.Default.ClientHandler] Sending HTTP request POST http://127.0.0.1:3000/validate-session 
+2026-06-27 00:24:28.2798 [INFO] [System.Net.Http.HttpClient.Default.ClientHandler] Received HTTP response headers after 65.7059ms - 200 
+2026-06-27 00:24:28.2798 [INFO] [System.Net.Http.HttpClient.Default.LogicalHandler] End processing HTTP request after 93.0109ms - 200 
+2026-06-27 00:24:28.3208 [WARN] [ArcheCore.WorldServer.Networking.C2W.C2WAuthenticateHandler] [C2WAuthenticateHandler] Invalid or expired token — disconnecting peer 127.0.0.1 
+2026-06-27 00:26:47.8357 [INFO] [Microsoft.Hosting.Lifetime] Application is shutting down... 
+2026-06-27 00:26:47.8357 [INFO] [ArcheCore.Worldserver.WorldServer] World stopping 
+2026-06-27 00:26:53.8954 [WARN] [ArcheCore.WorldServer.Lua.Scripting.LuaEngine] [LuaEngine] Script directory not found: F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\bin\Debug\net10.0\Lua\Server 
+2026-06-27 00:26:53.9427 [INFO] [ArcheCore.WorldServer.Managers.SpawnManager] Spawned 5 cubes. 
+2026-06-27 00:26:55.4052 [INFO] [ArcheCore.Worldserver.QuestManager] Loaded 0 quests from SQLite 
+2026-06-27 00:26:55.5288 [INFO] [Worldserver.ArcheCore.PersistenceServer.Scripts.PersistenceClient] [World] Sent W2PConnectRequest 
+2026-06-27 00:26:55.5288 [INFO] [Worldserver.ArcheCore.PersistenceServer.Scripts.PersistenceClient] [World] Sent HelloWorld 
+2026-06-27 00:26:55.5469 [INFO] [Worldserver.ArcheCore.PersistenceServer.Scripts.PersistenceClient] [World] Received P2WConnectResponse 
+2026-06-27 00:26:55.5500 [INFO] [ArcheCore.Worldserver.WorldServer] World started | localhost:7777 | TickRate=20 | MaxPlayers=500 
+2026-06-27 00:26:55.5500 [INFO] [ArcheCore.WorldServer.PersistenceServer.Networking.P2W.P2WConnectResponseHandler] Connected to Persistence Server 
+2026-06-27 00:26:55.5500 [INFO] [ArcheCore.Worldserver.Core.Services.DemoService] Started DemoService! 
+2026-06-27 00:26:55.5500 [INFO] [Microsoft.Hosting.Lifetime] Application started. Press Ctrl+C to shut down. 
+2026-06-27 00:26:55.5687 [INFO] [Microsoft.Hosting.Lifetime] Hosting environment: Production 
+2026-06-27 00:26:55.5687 [INFO] [Microsoft.Hosting.Lifetime] Content root path: F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\bin\Debug\net10.0 
+2026-06-27 00:26:56.5601 [INFO] [ArcheCore.Worldserver.WorldServer] Client connected: 127.0.0.1 
+2026-06-27 00:26:56.5651 [WARN] [ArcheCore.WorldServer.Networking.C2W.C2WAuthenticateHandler] Auth Token: d1a2f3ef-3d3e-499c-9fa1-005f798bf0dd 
+2026-06-27 00:26:56.6940 [INFO] [System.Net.Http.HttpClient.Default.LogicalHandler] Start processing HTTP request POST http://127.0.0.1:3000/validate-session 
+2026-06-27 00:26:56.6940 [INFO] [System.Net.Http.HttpClient.Default.ClientHandler] Sending HTTP request POST http://127.0.0.1:3000/validate-session 
+2026-06-27 00:26:56.7719 [INFO] [System.Net.Http.HttpClient.Default.ClientHandler] Received HTTP response headers after 67.5555ms - 200 
+2026-06-27 00:26:56.7719 [INFO] [System.Net.Http.HttpClient.Default.LogicalHandler] End processing HTTP request after 94.823ms - 200 
+2026-06-27 00:26:56.7719 [INFO] [ArcheCore.Worldserver.Core.Services.Authservice.AuthService] [AuthService] Raw response: {"Valid":false} 
+2026-06-27 00:26:56.8196 [WARN] [ArcheCore.WorldServer.Networking.C2W.C2WAuthenticateHandler] [C2WAuthenticateHandler] Invalid or expired token — disconnecting peer 127.0.0.1 
+2026-06-27 00:27:13.6117 [INFO] [ArcheCore.Worldserver.WorldServer] Client connected: 127.0.0.1 
+2026-06-27 00:27:13.6117 [WARN] [ArcheCore.WorldServer.Networking.C2W.C2WAuthenticateHandler] Auth Token: d1a2f3ef-3d3e-499c-9fa1-005f798bf0dd 
+2026-06-27 00:27:13.6117 [INFO] [System.Net.Http.HttpClient.Default.LogicalHandler] Start processing HTTP request POST http://127.0.0.1:3000/validate-session 
+2026-06-27 00:27:13.6117 [INFO] [System.Net.Http.HttpClient.Default.ClientHandler] Sending HTTP request POST http://127.0.0.1:3000/validate-session 
+2026-06-27 00:27:13.6117 [INFO] [System.Net.Http.HttpClient.Default.ClientHandler] Received HTTP response headers after 6.1225ms - 200 
+2026-06-27 00:27:13.6117 [INFO] [System.Net.Http.HttpClient.Default.LogicalHandler] End processing HTTP request after 7.7499ms - 200 
+2026-06-27 00:27:13.6117 [INFO] [ArcheCore.Worldserver.Core.Services.Authservice.AuthService] [AuthService] Raw response: {"Valid":false} 
+2026-06-27 00:27:13.6117 [WARN] [ArcheCore.WorldServer.Networking.C2W.C2WAuthenticateHandler] [C2WAuthenticateHandler] Invalid or expired token — disconnecting peer 127.0.0.1 
+2026-06-27 00:27:14.8139 [INFO] [ArcheCore.Worldserver.WorldServer] Client connected: 127.0.0.1 
+2026-06-27 00:27:14.8139 [WARN] [ArcheCore.WorldServer.Networking.C2W.C2WAuthenticateHandler] Auth Token: d1a2f3ef-3d3e-499c-9fa1-005f798bf0dd 
+2026-06-27 00:27:14.8139 [INFO] [System.Net.Http.HttpClient.Default.LogicalHandler] Start processing HTTP request POST http://127.0.0.1:3000/validate-session 
+2026-06-27 00:27:14.8139 [INFO] [System.Net.Http.HttpClient.Default.ClientHandler] Sending HTTP request POST http://127.0.0.1:3000/validate-session 
+2026-06-27 00:27:14.8139 [INFO] [System.Net.Http.HttpClient.Default.ClientHandler] Received HTTP response headers after 3.6362ms - 200 
+2026-06-27 00:27:14.8139 [INFO] [System.Net.Http.HttpClient.Default.LogicalHandler] End processing HTTP request after 5.2335ms - 200 
+2026-06-27 00:27:14.8139 [INFO] [ArcheCore.Worldserver.Core.Services.Authservice.AuthService] [AuthService] Raw response: {"Valid":false} 
+2026-06-27 00:27:14.8139 [WARN] [ArcheCore.WorldServer.Networking.C2W.C2WAuthenticateHandler] [C2WAuthenticateHandler] Invalid or expired token — disconnecting peer 127.0.0.1 
+2026-06-27 00:33:06.7712 [ERROR] [Worldserver.ArcheCore.PersistenceServer.Scripts.PersistenceClient] System.IO.IOException: Unable to read data from the transport connection: An existing connection was forcibly closed by the remote host.. System.IO.IOException: Unable to read data from the transport connection: An existing connection was forcibly closed by the remote host..
+ ---> System.Net.Sockets.SocketException (10054): An existing connection was forcibly closed by the remote host.
+   --- End of inner exception stack trace ---
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.ThrowException(SocketError error, CancellationToken cancellationToken)
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.System.Threading.Tasks.Sources.IValueTaskSource<System.Int32>.GetResult(Int16 token)
+   at System.Threading.Tasks.ValueTask`1.ValueTaskSourceAsTask.<>c.<.cctor>b__4_0(Object state)
+--- End of stack trace from previous location ---
+   at Worldserver.ArcheCore.PersistenceServer.Scripts.PersistenceClient.ReadExact(Byte[] buffer, Int32 size) in F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\Core\PersistenceServer\ArcheCore.PersistenceServer\PersistenceClient.cs:line 145
+   at Worldserver.ArcheCore.PersistenceServer.Scripts.PersistenceClient.ReceiveLoop() in F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\Core\PersistenceServer\ArcheCore.PersistenceServer\PersistenceClient.cs:line 115
+2026-06-27 00:33:09.6818 [INFO] [Microsoft.Hosting.Lifetime] Application is shutting down... 
+2026-06-27 00:33:09.7406 [INFO] [ArcheCore.Worldserver.WorldServer] World stopping 
+2026-06-27 00:48:06.3614 [WARN] [ArcheCore.WorldServer.Lua.Scripting.LuaEngine] [LuaEngine] Script directory not found: F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\bin\Debug\net10.0\Lua\Server 
+2026-06-27 00:48:06.3995 [INFO] [ArcheCore.WorldServer.Managers.SpawnManager] Spawned 5 cubes. 
+2026-06-27 00:48:07.4908 [INFO] [ArcheCore.Worldserver.QuestManager] Loaded 0 quests from SQLite 
+2026-06-27 00:48:07.6043 [INFO] [Worldserver.ArcheCore.PersistenceServer.Scripts.PersistenceClient] [World] Sent W2PConnectRequest 
+2026-06-27 00:48:07.6043 [INFO] [Worldserver.ArcheCore.PersistenceServer.Scripts.PersistenceClient] [World] Sent HelloWorld 
+2026-06-27 00:48:07.6207 [INFO] [ArcheCore.Worldserver.WorldServer] World started | localhost:7777 | TickRate=20 | MaxPlayers=500 
+2026-06-27 00:48:07.6207 [INFO] [ArcheCore.Worldserver.Core.Services.DemoService] Started DemoService! 
+2026-06-27 00:48:07.6207 [INFO] [Worldserver.ArcheCore.PersistenceServer.Scripts.PersistenceClient] [World] Received P2WConnectResponse 
+2026-06-27 00:48:07.6284 [INFO] [ArcheCore.WorldServer.PersistenceServer.Networking.P2W.P2WConnectResponseHandler] Connected to Persistence Server 
+2026-06-27 00:48:07.6284 [INFO] [Microsoft.Hosting.Lifetime] Application started. Press Ctrl+C to shut down. 
+2026-06-27 00:48:07.6284 [INFO] [Microsoft.Hosting.Lifetime] Hosting environment: Production 
+2026-06-27 00:48:07.6284 [INFO] [Microsoft.Hosting.Lifetime] Content root path: F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\bin\Debug\net10.0 
+2026-06-27 00:48:16.5379 [INFO] [ArcheCore.Worldserver.WorldServer] Client connected: 127.0.0.1 
+2026-06-27 00:48:16.5379 [WARN] [ArcheCore.WorldServer.Networking.C2W.C2WAuthenticateHandler] Auth Token: d1dfc909-63c8-4551-a369-bf55d04ea2a9 
+2026-06-27 00:48:16.6664 [INFO] [System.Net.Http.HttpClient.Default.LogicalHandler] Start processing HTTP request POST http://127.0.0.1:3000/validate-session 
+2026-06-27 00:48:16.6664 [INFO] [System.Net.Http.HttpClient.Default.ClientHandler] Sending HTTP request POST http://127.0.0.1:3000/validate-session 
+2026-06-27 00:48:16.7549 [INFO] [System.Net.Http.HttpClient.Default.ClientHandler] Received HTTP response headers after 77.3663ms - 200 
+2026-06-27 00:48:16.7549 [INFO] [System.Net.Http.HttpClient.Default.LogicalHandler] End processing HTTP request after 105.2692ms - 200 
+2026-06-27 00:48:16.7549 [INFO] [ArcheCore.Worldserver.Core.Services.Authservice.AuthService] [AuthService] Raw response: {"Valid":true,"AccountId":2} 
+2026-06-27 00:48:16.8056 [INFO] [ArcheCore.WorldServer.Networking.C2W.C2WAuthenticateHandler] [C2WAuthenticateHandler] Token valid. AccountId=2 — loading character. 
+2026-06-27 00:48:16.8056 [INFO] [Worldserver.ArcheCore.PersistenceServer.Scripts.PersistenceClient] [World] Sent CharacterLoad 
+2026-06-27 00:48:16.8142 [INFO] [Worldserver.ArcheCore.PersistenceServer.Scripts.PersistenceClient] [World] Received CharacterLoad 
+2026-06-27 00:48:16.8142 [INFO] [ArcheCore.WorldServer.PersistenceServer.Networking.P2W.P2WCharacterLoadHandler] [CharacterLoadHandler] Loaded CharacterId=2 Name= Level=0 Pos=(0, 0, 0) 
+2026-06-27 00:48:16.8142 [WARN] [ArcheCore.WorldServer.Networking.C2W.C2WAuthenticateHandler] [C2WAuthenticateHandler] No character found for AccountId=2 — disconnecting peer. 
+2026-06-27 00:49:11.2355 [INFO] [ArcheCore.Worldserver.WorldServer] Client connected: 127.0.0.1 
+2026-06-27 00:49:11.2355 [WARN] [ArcheCore.WorldServer.Networking.C2W.C2WAuthenticateHandler] Auth Token: bd017982-d051-4603-bafe-b2550f1fc33c 
+2026-06-27 00:49:11.2368 [INFO] [System.Net.Http.HttpClient.Default.LogicalHandler] Start processing HTTP request POST http://127.0.0.1:3000/validate-session 
+2026-06-27 00:49:11.2368 [INFO] [System.Net.Http.HttpClient.Default.ClientHandler] Sending HTTP request POST http://127.0.0.1:3000/validate-session 
+2026-06-27 00:49:11.2530 [INFO] [System.Net.Http.HttpClient.Default.ClientHandler] Received HTTP response headers after 15.3384ms - 200 
+2026-06-27 00:49:11.2530 [INFO] [System.Net.Http.HttpClient.Default.LogicalHandler] End processing HTTP request after 16.8098ms - 200 
+2026-06-27 00:49:11.2530 [INFO] [ArcheCore.Worldserver.Core.Services.Authservice.AuthService] [AuthService] Raw response: {"Valid":true,"AccountId":1} 
+2026-06-27 00:49:11.2530 [INFO] [ArcheCore.WorldServer.Networking.C2W.C2WAuthenticateHandler] [C2WAuthenticateHandler] Token valid. AccountId=1 — loading character. 
+2026-06-27 00:49:11.2530 [INFO] [Worldserver.ArcheCore.PersistenceServer.Scripts.PersistenceClient] [World] Sent CharacterLoad 
+2026-06-27 00:49:11.2530 [INFO] [Worldserver.ArcheCore.PersistenceServer.Scripts.PersistenceClient] [World] Received CharacterLoad 
+2026-06-27 00:49:11.2530 [INFO] [ArcheCore.WorldServer.PersistenceServer.Networking.P2W.P2WCharacterLoadHandler] [CharacterLoadHandler] Loaded CharacterId=1 Name=Moonsight Level=0 Pos=(3.1187434, 2.08, 0.020194024) 
+2026-06-27 00:49:11.2530 [INFO] [ArcheCore.WorldServer.Networking.C2W.C2WAuthenticateHandler] [C2WAuthenticateHandler] Character loaded: Moonsight — spawning. 
+2026-06-27 00:49:11.2934 [INFO] [ArcheCore.WorldServer.Managers.PlayerManager] Spawned Moonsight 
+2026-06-27 00:53:14.4562 [INFO] [Microsoft.Hosting.Lifetime] Application is shutting down... 
+2026-06-27 00:53:14.4562 [INFO] [ArcheCore.Worldserver.WorldServer] World stopping 
+2026-06-27 00:54:35.5186 [INFO] [Worldserver.ArcheCore.PersistenceServer.Scripts.PersistenceClient] [World] Sent W2PConnectRequest 
+2026-06-27 00:54:35.5365 [INFO] [Worldserver.ArcheCore.PersistenceServer.Scripts.PersistenceClient] [World] Received P2WConnectResponse 
+2026-06-27 00:54:35.5737 [INFO] [Worldserver.ArcheCore.PersistenceServer.Scripts.PersistenceClient] [World] Sent HelloWorld 
+2026-06-27 00:54:35.5737 [INFO] [ArcheCore.WorldServer.PersistenceServer.Networking.P2W.P2WConnectResponseHandler] Connected to Persistence Server 
+2026-06-27 00:54:35.6884 [WARN] [ArcheCore.WorldServer.Lua.Scripting.LuaEngine] [LuaEngine] Script directory not found: F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\bin\Debug\net10.0\Lua\Server 
+2026-06-27 00:54:36.9508 [INFO] [ArcheCore.Worldserver.QuestManager] Loaded 0 quests from SQLite 
+2026-06-27 00:54:36.9830 [INFO] [ArcheCore.Worldserver.WorldServer] World started | localhost:7777 | TickRate=20 | MaxPlayers=500 
+2026-06-27 00:54:36.9920 [INFO] [ArcheCore.WorldServer.Managers.SpawnManager] Spawned 5 cubes. 
+2026-06-27 00:54:36.9920 [INFO] [ArcheCore.Worldserver.Core.Services.DemoService] Started DemoService! 
+2026-06-27 00:54:37.0030 [INFO] [Microsoft.Hosting.Lifetime] Application started. Press Ctrl+C to shut down. 
+2026-06-27 00:54:37.0030 [INFO] [Microsoft.Hosting.Lifetime] Hosting environment: Production 
+2026-06-27 00:54:37.0030 [INFO] [Microsoft.Hosting.Lifetime] Content root path: F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Worldserver\bin\Debug\net10.0 
+2026-06-27 00:54:52.1110 [INFO] [Microsoft.Hosting.Lifetime] Application is shutting down... 
+2026-06-27 00:54:52.1110 [INFO] [ArcheCore.Worldserver.WorldServer] World stopping 

@@ -1,4 +1,5 @@
 ﻿using ArcheCore.Worldserver.Core.Services;
+using ArcheCore.Worldserver.Core.Services.Authservice;
 using ArcheCore.Worldserver.Utils.Config;
 using ArcheCore.Worldserver.Utils.Database.SQLite;
 using Microsoft.EntityFrameworkCore;
@@ -40,6 +41,7 @@ public static class ServerBootStrap
             
             
             services.AddSingleton<DemoService>();
+            services.AddHttpClient();
             services.AddSingleton<AuthService>();
             // Managers
             services.AddSingleton<QuestManager>();

@@ -1,11 +1,14 @@
 ﻿
 using System.Text;
 using ArcheCore.Worldserver.Utils.Config;
+using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 using NLog;
+using System.Net.Http;
+using Microsoft.Extensions.Http;
 
 
-namespace Shared.AuthService
+namespace ArcheCore.Worldserver.Core.Services.Authservice
 {
     /// <summary>
     /// Calls the Auth Server's /validate-session endpoint.
@@ -21,10 +24,10 @@ namespace Shared.AuthService
         private readonly WorldServerConfig _worldConfig;
 
         
-        public AuthService(HttpClient http)
+        public AuthService(IHttpClientFactory httpClientFactory, IOptions<WorldServerConfig> worldConfig)
         {
-            _http = http;
-            
+            _http = httpClientFactory.CreateClient();
+            _worldConfig = worldConfig.Value;
         }
         
         
@@ -61,6 +64,7 @@ namespace Shared.AuthService
                 }
 
                 string json = await response.Content.ReadAsStringAsync();
+                Logger.Info($"[AuthService] Raw response: {json}");
 
                 var result = JsonConvert.DeserializeObject<ValidateResponse>(json);
 
