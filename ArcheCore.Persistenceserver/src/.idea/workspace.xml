@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ChangeListManager">
+    <list default="true" id="cba5061e-e094-4779-bb41-5e9e23c572df" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/../.18b7f3fefffef97c-00000000.bun-build" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../.18b7fb9fbfdd83fe-00000000.bun-build" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../bin/ArcheCore.Persistenceserver.exe" beforeDir="false" afterPath="$PROJECT_DIR$/../bin/ArcheCore.Persistenceserver.exe" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../bin/persistence.db" beforeDir="false" afterPath="$PROJECT_DIR$/../bin/persistence.db" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Networking/P2W/P2WCharacterLoadResponseSender.ts" beforeDir="false" afterPath="$PROJECT_DIR$/Networking/P2W/P2WCharacterLoadResponseSender.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Networking/W2P/W2PCharacterLoadHandler.ts" beforeDir="false" afterPath="$PROJECT_DIR$/Networking/W2P/W2PCharacterLoadHandler.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Networking/W2P/W2PConnectHandler.ts" beforeDir="false" afterPath="$PROJECT_DIR$/Networking/W2P/W2PConnectHandler.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Shared/Packet.ts" beforeDir="false" afterPath="$PROJECT_DIR$/Shared/Packet.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Shared/Packets/Response/P2WCharacterLoadResponse.ts" beforeDir="false" afterPath="$PROJECT_DIR$/Shared/Packets/Response/P2WCharacterLoadResponse.ts" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$/.." />
+  </component>
+  <component name="GitHubPullRequestSearchHistory"><![CDATA[{
+  "lastFilter": {
+    "state": "OPEN",
+    "assignee": "Thepipsqueak62"
+  }
+}]]></component>
+  <component name="GithubPullRequestsUISettings"><![CDATA[{
+  "selectedUrlAndAccountId": {
+    "url": "https://github.com/Fezex-Studios/ArcheCore.Persistenceserver.git",
+    "accountId": "03b8108f-2f70-43fc-b3d1-4f17f777ce88"
+  }
+}]]></component>
+  <component name="ProjectColorInfo"><![CDATA[{
+  "associatedIndex": 0,
+  "fromUser": false
+}]]></component>
+  <component name="ProjectId" id="3F1amzjLv5PqAOFG8LHq2ofDDO5" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "codeWithMe.voiceChat.enabledByDefault": "false",
+    "git-widget-placeholder": "main",
+    "nodejs_package_manager_path": "npm",
+    "vue.rearranger.settings.migration": "true"
+  }
+}]]></component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-js-predefined-d6986cc7102b-31caf2ab9e3c-JavaScript-WS-261.25134.101" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="cba5061e-e094-4779-bb41-5e9e23c572df" name="Changes" comment="" />
+      <created>1781245191753</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1781245191753</updated>
+      <workItem from="1781245192808" duration="3000" />
+    </task>
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+</project>

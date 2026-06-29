@@ -1,4 +1,10 @@
 <Solution>
-  <Project Path="src/ArcheCore.Network/ArcheCore.Network.csproj" />
-  <Project Path="src/ArcheCore.Server.World/ArcheCore.Server.World.csproj" />
+  <Folder Name="/Libraries/">
+    <Project Path="ArcheCore.Dev/ArcheCore.Dev.csproj" />
+    <Project Path="ArcheCore.Net/ArcheCore.Net.csproj" />
+  </Folder>
+  <Folder Name="/Servers/">
+    <Project Path="ArcheCore.Masterserver/ArcheCore.Masterserver.csproj" />
+    <Project Path="ArcheCore.Worldserver/ArcheCore.Worldserver.csproj" />
+  </Folder>
 </Solution>

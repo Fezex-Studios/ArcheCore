@@ -1,0 +1,12 @@
+F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Dev\bin\Debug\net10.0\ArcheCore.Dev.deps.json
+F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Dev\bin\Debug\net10.0\ArcheCore.Dev.dll
+F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Dev\bin\Debug\net10.0\ArcheCore.Dev.pdb
+F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Dev\obj\Debug\net10.0\ArcheCore.Dev.GeneratedMSBuildEditorConfig.editorconfig
+F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Dev\obj\Debug\net10.0\ArcheCore.Dev.AssemblyInfoInputs.cache
+F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Dev\obj\Debug\net10.0\ArcheCore.Dev.AssemblyInfo.cs
+F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Dev\obj\Debug\net10.0\ArcheCore.Dev.csproj.CoreCompileInputs.cache
+F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Dev\obj\Debug\net10.0\ArcheCore.Dev.sourcelink.json
+F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Dev\obj\Debug\net10.0\ArcheCore.Dev.dll
+F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Dev\obj\Debug\net10.0\refint\ArcheCore.Dev.dll
+F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Dev\obj\Debug\net10.0\ArcheCore.Dev.pdb
+F:\Development\ProjectArcheCore\ArcheCore\ArcheCore.Dev\obj\Debug\net10.0\ref\ArcheCore.Dev.dll
