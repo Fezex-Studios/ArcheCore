@@ -258,3 +258,7 @@ Icon?
 # Keep the encrypted gamedata.db in StreamingAssets if you bundle it
 # (comment this out if you generate it in CI instead)
 !Assets/StreamingAssets/GameData/gamedata.db
+
+
+./.idea
+
