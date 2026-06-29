@@ -1,10 +1,10 @@
 """
 encrypt_gamedata.py
 
-Encrypts a plaintext gamedata.db into the format GameDataCrypto.cs expects:
+Encrypts a plaintext _oggamedata.db into the format GameDataCrypto.cs expects:
 [16-byte random IV][AES-256-CBC ciphertext, PKCS7 padded]
 
-Run this any time you update gamedata.db, on BOTH the copy you put in
+Run this any time you update _oggamedata.db, on BOTH the copy you put in
 StreamingAssets/GameData/ and the copy you drop next to the Authserver.
 They must be encrypted with the same KEY value below, and that value must
 exactly match the Key array in ArcheCore.Client/GameData/GameDataCrypto.cs.
