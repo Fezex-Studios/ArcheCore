@@ -1,2 +1,0 @@
-# ArcheCore.Authserver
-
