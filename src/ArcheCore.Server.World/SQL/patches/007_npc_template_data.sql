@@ -1,0 +1,1 @@
+INSERT INTO "NpcTemplates" (Name, Level, ModelType) VALUES ('Orc Grunt', 5, 'NPC_Orc');
