@@ -4,11 +4,15 @@ namespace ArcheCore.Server.World;
 
 public class Program
 {
-    static void Main(string[] args)
+    public static void Main(string[] args)
     {
-        Host.CreateDefaultBuilder(args)
+        var builder = Host.CreateApplicationBuilder(args);
+
+        builder
             .UseWorldServer()
-            .Build()
-            .Run();
+            .AddDemoBootstrap();
+
+        var host = builder.Build();
+        host.Run();
     }
 }
