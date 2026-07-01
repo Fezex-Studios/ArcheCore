@@ -283,5 +283,16 @@ namespace ArcheCore.Server.World.Managers
 
             return -1;
         }
+
+        public long GetCharacterId(NetPeer peer)
+        {
+            if (peerToId.TryGetValue(peer, out var networkId) &&
+                idToCharacterId.TryGetValue(networkId, out var characterId))
+            {
+                return characterId;
+            }
+
+            return -1;
+        }
     }
 }
