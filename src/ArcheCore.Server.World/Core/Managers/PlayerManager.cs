@@ -272,5 +272,16 @@ namespace ArcheCore.Server.World.Managers
 
             );
         }
+
+        public int GetLevel(NetPeer peer)
+        {
+            if (peerToId.TryGetValue(peer, out var id) &&
+                idToLevel.TryGetValue(id, out var level))
+            {
+                return level;
+            }
+
+            return -1;
+        }
     }
 }

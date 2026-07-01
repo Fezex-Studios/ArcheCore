@@ -11,6 +11,8 @@
         PlayerLeave  = 7,
         Announcement = 9,
         SpawnNpc = 10,
-        W2CTestPacket =11
+        W2CTestPacket =11,
+        RequestPlayerLevel = 12,
+        PlayerLevelResponse = 13
     }
 }
