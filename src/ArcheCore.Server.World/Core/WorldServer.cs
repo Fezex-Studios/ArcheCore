@@ -37,6 +37,8 @@ public class WorldServer : IHostedService,INetEventListener
     private SpawnManager _spawnManager;
     private ReplicationManager _replicationManager;
     private CancellationTokenSource _tickCts;
+    private PersistenceClient _persistenceClient;
+    private DemoManager _demoManager;
     
     
     // Services
@@ -56,7 +58,8 @@ public class WorldServer : IHostedService,INetEventListener
         DemoService demoService,
         AuthService authService,
         GameDataPatchRunner dataPatchRunner,
-        IDbContextFactory<WorldDataDbContext> dbFactory
+        IDbContextFactory<WorldDataDbContext> dbFactory,
+        DemoManager demoManager
         
         )
     {
@@ -69,6 +72,7 @@ public class WorldServer : IHostedService,INetEventListener
         _authService = authService;
         _dataPatchRunner = dataPatchRunner;
         _dbFactory = dbFactory;
+        _demoManager = demoManager;
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -77,13 +81,13 @@ public class WorldServer : IHostedService,INetEventListener
         await _dataPatchRunner.RunAsync();
 
         // 1. Connect to PersistenceServer
-        var persistenceClient = new PersistenceClient(_world);
-        await persistenceClient.Start();
+        _persistenceClient = new PersistenceClient(_world);
+        await _persistenceClient.Start();
 
         // 2. Initialize managers
         _replicationManager = new ReplicationManager();
         _spawnManager = new SpawnManager(_replicationManager, _dbFactory);  // pass factory
-        _playerManager = new PlayerManager(_spawnManager, _replicationManager, _world);
+        _playerManager = new PlayerManager(_spawnManager, _replicationManager, _world,_persistenceClient,_demoManager);
         _playerManager.InitializeScripts();
 
         // 3. Load game data
@@ -134,7 +138,7 @@ public class WorldServer : IHostedService,INetEventListener
     private void RegisterPackets()
     {
         
-        _packetDispatcher.Register(Opcodes.Authenticate, new C2WAuthenticateHandler(_playerManager, _authService));
+        _packetDispatcher.Register(Opcodes.Authenticate, new C2WAuthenticateHandler(_playerManager, _authService,_persistenceClient));
         _packetDispatcher.Register(Opcodes.PlayerMove,   new C2WMovementHandler(_playerManager));
     }
         

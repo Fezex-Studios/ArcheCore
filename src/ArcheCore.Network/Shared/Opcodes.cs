@@ -10,6 +10,7 @@
         Authenticate = 6,
         PlayerLeave  = 7,
         Announcement = 9,
-        SpawnNpc = 10
+        SpawnNpc = 10,
+        W2CTestPacket =11
     }
 }

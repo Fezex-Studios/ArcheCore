@@ -32,6 +32,8 @@ namespace ArcheCore.Server.World.Managers
         private readonly ReplicationManager _replication;
         private readonly LuaEngine luaEngine = new();
         private readonly WorldServerConfig _worldConfig;
+        private readonly PersistenceClient _persistence;
+        private readonly DemoManager _demoManager;
 
         private static readonly Logger Logger =
             LogManager.GetCurrentClassLogger();
@@ -45,11 +47,16 @@ namespace ArcheCore.Server.World.Managers
         public PlayerManager(
             SpawnManager spawnManager,
             ReplicationManager replication,
-            WorldServerConfig worldConfig)
+            WorldServerConfig worldConfig,
+            PersistenceClient persistence,
+            DemoManager demoManager
+            )
         {
             _spawnManager = spawnManager;
             _replication = replication;
             _worldConfig = worldConfig;
+            _persistence = persistence;
+            _demoManager = demoManager;
         }
 
         public void DrainActions()
@@ -94,7 +101,6 @@ namespace ArcheCore.Server.World.Managers
             accountToPeer[accountId] = peer;
 
             W2CMOTDPacketSender.Send(
-                _replication,
                 peer,
                 _worldConfig.MOTD);
 
@@ -122,6 +128,7 @@ namespace ArcheCore.Server.World.Managers
                     positions[kvp.Value],
                     false);
             }
+            _demoManager.OnPlayerJoin(peer);
         }
 
         public void HandlePlayerDisconnected(NetPeer peer)
@@ -255,27 +262,15 @@ namespace ArcheCore.Server.World.Managers
             int level,
             Vector3 pos)
         {
-            var persistence =
-                PersistenceClient.Instance;
-
-            if (persistence == null)
-            {
-                Logger.Warn(
-                    "Persistence unavailable");
-
-                return;
-            }
-
-            await persistence.W2PCharacter.Save(
+            await _persistence.W2PCharacter.Save(
                 characterId,
                 name,
                 level,
                 pos.X,
                 pos.Y,
-                pos.Z);
+                pos.Z
 
-            Logger.Info(
-                $"Saved character {characterId}");
+            );
         }
     }
 }

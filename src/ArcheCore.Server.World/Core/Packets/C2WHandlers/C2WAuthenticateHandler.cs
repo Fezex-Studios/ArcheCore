@@ -18,12 +18,14 @@ namespace ArcheCore.Server.World.Networking.C2W
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
         private readonly PlayerManager playerManager;
         private readonly AuthService authService; 
+        private readonly PersistenceClient persistence;
 
 
-        public C2WAuthenticateHandler(PlayerManager playerManager, AuthService authService)
+        public C2WAuthenticateHandler(PlayerManager playerManager, AuthService authService, PersistenceClient persistence)
         {
             this.playerManager = playerManager;
             this.authService = authService;  // was assigning null before
+            this.persistence = persistence;
         }
 
         public void Handle(
@@ -58,24 +60,13 @@ namespace ArcheCore.Server.World.Networking.C2W
             Logger.Info(
                 $"[C2WAuthenticateHandler] Token valid. AccountId={accountId} — loading character.");
 
-            var persistence = PersistenceClient.Instance;
-
-            if (persistence == null)
-            {
-                Logger.Error("[C2WAuthenticateHandler] PersistenceClient.Instance is null — cannot load character");
-                playerManager.EnqueueAction(() => peer.Disconnect());
-                return;
-            }
-
-            P2WCharacterLoadResponse p2WCharacter =
-                await persistence.W2PCharacter.Load(accountId);
+            var p2WCharacter = await persistence.W2PCharacter.Load(accountId);
 
             if (!p2WCharacter.Found)
             {
                 Logger.Warn(
                     $"[C2WAuthenticateHandler] No character found for AccountId={accountId} — disconnecting peer.");
 
-                // TODO: once character creation is built, redirect to char create screen instead
                 playerManager.EnqueueAction(() => peer.Disconnect());
                 return;
             }

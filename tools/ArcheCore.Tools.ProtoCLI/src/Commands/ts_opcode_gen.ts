@@ -1,5 +1,5 @@
 import fs from "fs";
-import {tsEnum, TypescriptOPCodes} from "../Lib/psOpcodes/proto.ts.ts";
+import {tsEnum, TypescriptOPCodes} from "../Lib/GenOpcodes/psOpcodes/proto.ts.ts";
 import * as dotenv from 'dotenv'
 dotenv.config()
 

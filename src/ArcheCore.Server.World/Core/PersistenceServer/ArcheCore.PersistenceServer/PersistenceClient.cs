@@ -29,7 +29,7 @@ namespace Worldserver.ArcheCore.PersistenceServer.Scripts
         internal readonly ConcurrentDictionary<long, TaskCompletionSource<P2WCharacterLoadResponse>>
             pendingLoads = new();
 
-        public static PersistenceClient Instance { get; private set; }
+        
         public W2PCharacterSender W2PCharacter { get; private set; }
         public W2PHelloWorldSender W2PHelloWorld { get; private set; }
 
@@ -41,7 +41,6 @@ namespace Worldserver.ArcheCore.PersistenceServer.Scripts
 
         public async Task Start()
         {
-            Instance = this;
 
             dispatcher = new PersistenceDispatcher();
             W2PCharacter  = new W2PCharacterSender(this);

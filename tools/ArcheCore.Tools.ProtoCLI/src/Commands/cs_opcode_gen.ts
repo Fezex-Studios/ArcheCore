@@ -1,4 +1,4 @@
-import {CSharpOpCodes} from "../Lib/psOpcodes/proto.cs.ts";
+import {CSharpOpCodes} from "../Lib/GenOpcodes/psOpcodes/proto.cs.ts";
 
 export async function CSPersistenceOPCodeGen()
 {

@@ -1,23 +1,18 @@
-﻿using System.Collections.Generic;
+﻿using LiteNetLib;
 using ArcheCore.Library.Net.Worldserver;
 using ArcheCore.Network.Shared.Packets.W2C;
-using ArcheCore.Server.World.Managers;
-using LiteNetLib;
-
+using ArcheCore.Network.Worldserver;
 
 namespace ArcheCore.Server.World.Networking.W2C
 {
     public static class W2CMOTDPacketSender
     {
-        public static void Send(
-            ReplicationManager replication,
-            NetPeer peer,
-            string message)
+        public static void Send(NetPeer peer, string message)
         {
-            replication.Send(
+            WorldserverPacketSender.SendPacket(
+                peer,
                 Opcodes.MOTD,
-                new W2CMOTDPacket { Message = message },
-                peer);
+                new W2CMOTDPacket { Message = message });
         }
     }
 }
