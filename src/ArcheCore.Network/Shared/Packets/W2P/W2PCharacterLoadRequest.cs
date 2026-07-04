@@ -7,6 +7,6 @@ namespace ArcheCore.Network.Shared.Packets.PersistenceServer.W2P
     [MessagePackObject(true)]
     public class W2PCharacterLoadRequest
     {
-        public long CharacterId;
+        public long AccountId;
     }
 }

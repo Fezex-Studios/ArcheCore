@@ -7,17 +7,13 @@ export const db =
 db.exec(`
     CREATE TABLE IF NOT EXISTS characters
     (
-        character_id INTEGER PRIMARY KEY,
-
-        name TEXT NOT NULL,
-
-        level INTEGER NOT NULL,
-
-        pos_x REAL NOT NULL,
-
-        pos_y REAL NOT NULL,
-
-        pos_z REAL NOT NULL
+        character_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id   INTEGER NOT NULL,
+        name         TEXT    NOT NULL,
+        level        INTEGER NOT NULL DEFAULT 1,
+        pos_x        REAL    NOT NULL DEFAULT 0,
+        pos_y        REAL    NOT NULL DEFAULT 2,
+        pos_z        REAL    NOT NULL DEFAULT 0
     )
 `);
 

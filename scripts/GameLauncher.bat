@@ -1,4 +1,4 @@
 @echo off
-start ..\..\ArcheCore.Client\bin\ArcheCore.Client\ArcheCore.Client.exe -token 5d576500-1c2b-4651-adf2-a4a1ed7cb9c7
+start ..\..\ArcheCore.Client\bin\ArcheCore.Client\ArcheCore.Client.exe -token 5b65541c-ec76-405d-91f0-bad9c2268626
 
 

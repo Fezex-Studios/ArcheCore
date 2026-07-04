@@ -10,26 +10,36 @@ export async function W2PCharacterSaveHandler(
     const save =
         decode(payload) as W2PCharacterSaveRequest;
 
-    db.prepare(`
-        INSERT OR REPLACE INTO characters
-        (
-            character_id,
-            name,
-            level,
-            pos_x,
-            pos_y,
-            pos_z
-        )
-        VALUES (?, ?, ?, ?, ?, ?)
-    `).run(
-        save.CharacterId,
-        save.Name,
-        save.Level,
-        save.X,
-        save.Y,
-        save.Z
-    );
+    try
+    {
+        db.prepare(`
+            INSERT OR REPLACE INTO characters
+            (
+                character_id,
+                account_id,
+                name,
+                level,
+                pos_x,
+                pos_y,
+                pos_z
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(
+            save.CharacterId,
+            save.AccountId,
+            save.Name,
+            save.Level,
+            save.X,
+            save.Y,
+            save.Z
+        );
 
-    console.log(
-        `Saved ${save.Name}`);
+        console.log(
+            `Saved ${save.Name}`);
+    }
+    catch (e)
+    {
+        console.error(
+            `[Persistence] Save failed for CharacterId=${save.CharacterId}: ${e}`);
+    }
 }

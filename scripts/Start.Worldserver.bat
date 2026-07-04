@@ -1,5 +1,5 @@
 @echo off
-pushd ..\ArcheCore.Unity\bin\ArcheCore.WorldServer\
-ArcheCore.WorldServer.exe
+pushd ..\src\ArcheCore.Server.World\bin\Debug\net10.0\
+ArcheCore.Server.World.exe
 popd
 pause
