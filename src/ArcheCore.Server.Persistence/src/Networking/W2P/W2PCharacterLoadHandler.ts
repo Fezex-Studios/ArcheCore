@@ -22,49 +22,35 @@ export async function W2PCharacterLoadHandler(
     socket: net.Socket,
     payload: Uint8Array)
 {
-    const request =
-        decode(payload) as W2PCharacterLoadRequest;
+    const request = decode(payload) as W2PCharacterLoadRequest;
 
-    const row =
-        db.prepare(`
-            SELECT *
-            FROM characters
-            WHERE character_id = ?
-        `)
-            .get(request.CharacterId) as CharacterRow;
+    const row = db.prepare(`
+        SELECT * FROM characters WHERE account_id = ?
+    `).get(request.AccountId) as CharacterRow;
 
     if (!row)
     {
-        console.log(
-            `[Persistence] Character ${request.CharacterId} not found — sending empty response`);
-
-        SendP2WCharacterLoadResponse(
-            socket,
-            {
-                Found:       false,
-                CharacterId: request.CharacterId,
-                Name:        "",
-                Level:       0,
-                X:           0,
-                Y:           0,
-                Z:           0
-            });
-
+        SendP2WCharacterLoadResponse(socket, {
+            Found:       false,
+            AccountId:   request.AccountId,
+            CharacterId: 0,
+            Name:        "",
+            Level:       0,
+            X:           0,
+            Y:           0,
+            Z:           0
+        });
         return;
     }
 
-    const response: P2WCharacterLoadResponse =
-        {
-            Found:       true,
-            CharacterId: row.character_id,
-            Name:        row.name,
-            Level:       row.level,
-            X:           row.pos_x,
-            Y:           row.pos_y,
-            Z:           row.pos_z
-        };
-
-    SendP2WCharacterLoadResponse(
-        socket,
-        response);
+    SendP2WCharacterLoadResponse(socket, {
+        Found:       true,
+        AccountId:   request.AccountId,
+        CharacterId: row.character_id,
+        Name:        row.name,
+        Level:       row.level,
+        X:           row.pos_x,
+        Y:           row.pos_y,
+        Z:           row.pos_z
+    });
 }

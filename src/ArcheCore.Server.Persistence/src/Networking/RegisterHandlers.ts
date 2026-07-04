@@ -13,6 +13,7 @@ import { W2PCharacterSaveHandler }
 import { W2PCharacterLoadHandler }
     from "./W2P/W2PCharacterLoadHandler";
 import {W2PHelloWorldHandler} from "./W2P/W2PHelloWorldHandler";
+import {W2PCharacterCreateHandler} from "./W2P/W2PCharacterCreateHandler";
 
 export function RegisterHandlers()
 {
@@ -30,4 +31,6 @@ export function RegisterHandlers()
         ProtocolPersistence.HelloWorld,
         W2PHelloWorldHandler
     )
+    RegisterHandler(
+        ProtocolPersistence.CharacterCreate,     W2PCharacterCreateHandler);
 }

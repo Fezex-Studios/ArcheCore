@@ -7,7 +7,9 @@ namespace ArcheCore.Network.Shared.Packets.PersistenceServer.W2P
     public class W2PCharacterSaveRequest
     {
         public long CharacterId;
-    
+
+        public int AccountId;
+
         public string Name;
     
         public int Level;

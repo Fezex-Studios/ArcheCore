@@ -34,6 +34,8 @@ namespace ArcheCore.Server.World.Managers
         private readonly WorldServerConfig _worldConfig;
         private readonly PersistenceClient _persistence;
         private readonly DemoManager _demoManager;
+        private readonly Dictionary<NetPeer, int> _pendingCreation = new();
+
 
         private static readonly Logger Logger =
             LogManager.GetCurrentClassLogger();
@@ -50,6 +52,7 @@ namespace ArcheCore.Server.World.Managers
             WorldServerConfig worldConfig,
             PersistenceClient persistence,
             DemoManager demoManager
+            
             )
         {
             _spawnManager = spawnManager;
@@ -82,6 +85,20 @@ namespace ArcheCore.Server.World.Managers
         public void EnqueueAction(Action action)
         {
             pendingActions.Enqueue(action);
+        }
+        public void TrackPendingCreation(NetPeer peer, int accountId)
+        {
+            _pendingCreation[peer] = accountId;
+        }
+
+        public bool TryGetPendingAccountId(NetPeer peer, out int accountId)
+        {
+            return _pendingCreation.TryGetValue(peer, out accountId);
+        }
+
+        public void ClearPendingCreation(NetPeer peer)
+        {
+            _pendingCreation.Remove(peer);
         }
 
         public void HandlePlayerConnected(
@@ -168,6 +185,7 @@ namespace ArcheCore.Server.World.Managers
 
                 _ = SaveCharacterAsync(
                     characterId,
+                    accountId,
                     name,
                     level,
                     pos);
@@ -258,18 +276,19 @@ namespace ArcheCore.Server.World.Managers
 
         private async Task SaveCharacterAsync(
             long characterId,
+            int accountId,
             string name,
             int level,
             Vector3 pos)
         {
             await _persistence.W2PCharacter.Save(
                 characterId,
+                accountId,
                 name,
                 level,
                 pos.X,
                 pos.Y,
                 pos.Z
-
             );
         }
 

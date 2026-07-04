@@ -1,5 +1,5 @@
 @echo off
-pushd ..\ArcheCore.Persistenceserver\bin\
+pushd ..\src\ArcheCore.Server.Persistence\bin\
 ArcheCore.Persistenceserver.exe
 popd
 pause

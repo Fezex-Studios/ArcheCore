@@ -1,6 +1,8 @@
 ﻿
+using ArcheCore.Library.Net.Worldserver;
 using ArcheCore.Network.Shared.Packets.C2W;
 using ArcheCore.Network.Shared.Packets.PersistenceServer.P2W;
+using ArcheCore.Network.Shared.Packets.W2C;
 using ArcheCore.Network.Worldserver;
 using ArcheCore.Server.World.Managers;
 using ArcheCore.Server.World.Core.Services.Authservice;
@@ -60,14 +62,25 @@ namespace ArcheCore.Server.World.Networking.C2W
             Logger.Info(
                 $"[C2WAuthenticateHandler] Token valid. AccountId={accountId} — loading character.");
 
-            var p2WCharacter = await persistence.W2PCharacter.Load(accountId);
+            P2WCharacterLoadResponse p2WCharacter =
+                await persistence.W2PCharacter.Load(accountId);
 
             if (!p2WCharacter.Found)
             {
                 Logger.Warn(
-                    $"[C2WAuthenticateHandler] No character found for AccountId={accountId} — disconnecting peer.");
+                    $"[C2WAuthenticateHandler] No character for AccountId={accountId} " +
+                    $"— sending CharacterNotFound");
 
-                playerManager.EnqueueAction(() => peer.Disconnect());
+                playerManager.EnqueueAction(() =>
+                {
+                    playerManager.TrackPendingCreation(peer, accountId);
+
+                    WorldserverPacketSender.SendPacket(
+                        peer,
+                        Opcodes.W2CCharacterNotFound,
+                        new W2CCharacterNotFoundPacket());
+                });
+
                 return;
             }
 

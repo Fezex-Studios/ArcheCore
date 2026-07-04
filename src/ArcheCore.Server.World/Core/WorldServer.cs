@@ -140,7 +140,10 @@ public class WorldServer : IHostedService,INetEventListener
         
         _packetDispatcher.Register(Opcodes.Authenticate, new C2WAuthenticateHandler(_playerManager, _authService,_persistenceClient));
         _packetDispatcher.Register(Opcodes.PlayerMove,   new C2WMovementHandler(_playerManager));
-        _packetDispatcher.Register(Opcodes.RequestPlayerLevel, new C2WRequestPlayerLevelHandler(_playerManager,_persistenceClient));
+        _packetDispatcher.Register(Opcodes.RequestPlayerLevel, new C2WRequestPlayerLevelHandler(_playerManager));
+        _packetDispatcher.Register(
+            Opcodes.C2WCreateCharacterRequest,
+            new C2WCreateCharacterHandler(_playerManager, _persistenceClient));
     }
         
     

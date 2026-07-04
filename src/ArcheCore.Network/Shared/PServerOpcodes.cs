@@ -7,5 +7,7 @@
         CharacterLoad = 3,
         P2WConnectResponse = 4,
         HelloWorld =5,
+        CharacterCreate = 6,
+        P2WCharacterCreateResponse = 7,
     }
 }

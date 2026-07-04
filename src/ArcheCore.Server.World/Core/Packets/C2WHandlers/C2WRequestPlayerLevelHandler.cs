@@ -14,31 +14,25 @@ public class C2WRequestPlayerLevelHandler: IPacketHandler
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
     private readonly PlayerManager playerManager;
-    private readonly PersistenceClient persistence;
     
     
-    public C2WRequestPlayerLevelHandler(PlayerManager playerManager, PersistenceClient persistence)
+    public C2WRequestPlayerLevelHandler(PlayerManager playerManager)
     {
         this.playerManager = playerManager;
-        this.persistence = persistence;
     }
 
     public void Handle(NetPeer peer, NetPacketReader reader)
     {
-        MessagePackSerializer.Deserialize<C2WRequestPlayerLevelPacket>(reader.GetRemainingBytes());
+        MessagePackSerializer.Deserialize<C2WRequestPlayerLevelPacket>(
+            reader.GetRemainingBytes());
 
-        long characterId = playerManager.GetCharacterId(peer); // add this getter, mirrors GetLevel
-        if (characterId == -1) return;
+        int level = playerManager.GetLevel(peer);
+        if (level == -1) return;
 
-        _ = FetchAndReply(peer, characterId);
-    }
-
-    private async Task FetchAndReply(NetPeer peer, long characterId)
-    {
-        var character = await persistence.W2PCharacter.Load(characterId);
-
+        // No need to go to persistence — level is already in memory
         playerManager.EnqueueAction(() =>
-            W2CPlayerLevelResponsePacketSender.Send(peer, character.Level));
+            W2CPlayerLevelResponsePacketSender.Send(peer, level));
     }
+    
     
 }

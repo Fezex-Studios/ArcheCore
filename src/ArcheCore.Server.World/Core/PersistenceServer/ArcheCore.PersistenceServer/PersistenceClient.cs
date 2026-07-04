@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Net.Sockets;
 using System.Threading.Tasks;
 using ArcheCore.Network.PersistenceServer;
@@ -9,31 +8,31 @@ using ArcheCore.Network.Shared.Packets.PersistenceServer.P2W;
 using ArcheCore.Network.Shared.Packets.PersistenceServer.W2P;
 using ArcheCore.Server.World.PersistenceServer.Networking;
 using ArcheCore.Server.World.PersistenceServer.Networking.P2W;
-
 using ArcheCore.Server.World.PersistenceServer.Senders;
 using ArcheCore.Server.World.Utils.Config;
 using MessagePack;
 using NLog;
 
-
 namespace Worldserver.ArcheCore.PersistenceServer.Scripts
 {
-    public class PersistenceClient 
+    public class PersistenceClient
     {
-        private TcpClient client;
-        private NetworkStream stream;
+        private TcpClient      client;
+        private NetworkStream  stream;
         private PersistenceDispatcher dispatcher;
         private readonly WorldServerConfig _worldConfig;
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
-        internal readonly ConcurrentDictionary<long, TaskCompletionSource<P2WCharacterLoadResponse>>
+        // key is AccountId (int) — not CharacterId
+        internal readonly ConcurrentDictionary<int, TaskCompletionSource<P2WCharacterLoadResponse>>
             pendingLoads = new();
 
-        
-        public W2PCharacterSender W2PCharacter { get; private set; }
+        internal readonly ConcurrentDictionary<int, TaskCompletionSource<P2WCreateCharacterResponse>>
+            pendingCreates = new();
+
+        public W2PCharacterSender  W2PCharacter  { get; private set; }
         public W2PHelloWorldSender W2PHelloWorld { get; private set; }
 
-        
         public PersistenceClient(WorldServerConfig worldConfig)
         {
             _worldConfig = worldConfig;
@@ -41,8 +40,7 @@ namespace Worldserver.ArcheCore.PersistenceServer.Scripts
 
         public async Task Start()
         {
-
-            dispatcher = new PersistenceDispatcher();
+            dispatcher    = new PersistenceDispatcher();
             W2PCharacter  = new W2PCharacterSender(this);
             W2PHelloWorld = new W2PHelloWorldSender(this);
 
@@ -64,7 +62,9 @@ namespace Worldserver.ArcheCore.PersistenceServer.Scripts
                 {
                     Message = "WorldServer 1 has connected"
                 });
-            await W2PHelloWorld.Send("Hello THIS IS A MESSAGE SENT FROM THE WORLDSERVER");
+
+            await W2PHelloWorld.Send(
+                "Hello THIS IS A MESSAGE SENT FROM THE WORLDSERVER");
         }
 
         private void RegisterHandlers()
@@ -76,15 +76,29 @@ namespace Worldserver.ArcheCore.PersistenceServer.Scripts
             dispatcher.Register(
                 PServerOpcodes.CharacterLoad,
                 new P2WCharacterLoadHandler(this));
+
+            // NEW
+            dispatcher.Register(
+                PServerOpcodes.P2WCharacterCreateResponse,
+                new P2WCharacterCreateResponseHandler(this));
         }
 
         public void ResolveLoad(P2WCharacterLoadResponse response)
         {
-            if (pendingLoads.TryRemove(response.CharacterId, out var tcs))
+            if (pendingLoads.TryRemove(response.AccountId, out var tcs))
                 tcs.SetResult(response);
             else
                 Logger.Warn(
-                    $"[PersistenceClient] No pending load for CharacterId={response.CharacterId}");
+                    $"[PersistenceClient] No pending load for AccountId={response.AccountId}");
+        }
+
+        public void ResolveCreate(P2WCreateCharacterResponse response)
+        {
+            if (pendingCreates.TryRemove(response.AccountId, out var tcs))
+                tcs.SetResult(response);
+            else
+                Logger.Warn(
+                    $"[PersistenceClient] No pending create for AccountId={response.AccountId}");
         }
 
         internal async Task Send<T>(PServerOpcodes opcode, T payload)
@@ -113,17 +127,18 @@ namespace Worldserver.ArcheCore.PersistenceServer.Scripts
                     byte[] lengthBuffer = new byte[4];
                     int read = await ReadExact(lengthBuffer, 4);
 
-                    if (read == 0)
-                        break;
+                    if (read == 0) break;
 
-                    int packetLength = BitConverter.ToInt32(lengthBuffer, 0);
+                    int    packetLength = BitConverter.ToInt32(lengthBuffer, 0);
                     byte[] packetBuffer = new byte[packetLength];
 
                     await ReadExact(packetBuffer, packetLength);
 
-                    PersistencePacket persistencePacket = MessagePackSerializer.Deserialize<PersistencePacket>(packetBuffer);
+                    PersistencePacket persistencePacket =
+                        MessagePackSerializer.Deserialize<PersistencePacket>(packetBuffer);
 
-                    Logger.Info($"[World] Received {(PServerOpcodes)persistencePacket.Opcode}");
+                    Logger.Info(
+                        $"[World] Received {(PServerOpcodes)persistencePacket.Opcode}");
 
                     dispatcher.Handle(persistencePacket);
                 }
@@ -141,10 +156,10 @@ namespace Worldserver.ArcheCore.PersistenceServer.Scripts
 
             while (totalRead < size)
             {
-                int read = await stream.ReadAsync(buffer, totalRead, size - totalRead);
+                int read = await stream.ReadAsync(
+                    buffer, totalRead, size - totalRead);
 
-                if (read == 0)
-                    return 0;
+                if (read == 0) return 0;
 
                 totalRead += read;
             }
