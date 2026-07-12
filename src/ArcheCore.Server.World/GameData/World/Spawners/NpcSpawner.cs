@@ -9,7 +9,7 @@ using LiteNetLib;
 
 namespace ArcheCore.Server.World.GameData.World.Spawners;
 
-public class NpcSpawner(ReplicationManager replication)
+public class NpcSpawner(ReplicationManager replication, InteractionRegistry interactions)
 {
     private readonly Dictionary<int, NpcEntity> _live = new();
 
@@ -18,15 +18,27 @@ public class NpcSpawner(ReplicationManager replication)
         NpcTemplate template,
         Vector3 position)
     {
-        _live[networkId] = new NpcEntity
+        var npc = new NpcEntity
         {
-            NetworkId  = networkId,
-            TemplateId = template.Id,
-            Name       = template.Name,
-            Level      = template.Level,
-            ModelType  = template.ModelType,
-            Position   = position
+            NetworkId     = networkId,
+            TemplateId    = template.Id,
+            Name          = template.Name,
+            Level         = template.Level,
+            ModelType     = template.ModelType,
+            InteractRange = template.InteractRange,
+            Position      = position
         };
+
+        _live[networkId] = npc;
+
+        // Makes this NPC a valid C2WInteractPacket target.
+        interactions.Register(networkId, npc);
+    }
+
+    public void DespawnNpc(int networkId)
+    {
+        _live.Remove(networkId);
+        interactions.Unregister(networkId);
     }
 
     public void SendToPeer(NetPeer peer)
@@ -47,7 +59,8 @@ public class NpcSpawner(ReplicationManager replication)
                 ModelType  = npc.ModelType,
                 X          = npc.Position.X,
                 Y          = npc.Position.Y,
-                Z          = npc.Position.Z
+                Z          = npc.Position.Z,
+                InteractRange = npc.InteractRange
             }, peer);
     }
 }

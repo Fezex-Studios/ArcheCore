@@ -1,10 +1,12 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Numerics;
 using System.Threading.Tasks;
 
 using ArcheCore.Network.Shared.Packets.PersistenceServer.P2W;
+using ArcheCore.Server.World.Core.Interaction;
 using ArcheCore.Server.World.Lua.Scripting;
 using ArcheCore.Server.World.Lua.Scripting.Bindings;
 using ArcheCore.Server.World.Networking.W2C;
@@ -21,6 +23,7 @@ namespace ArcheCore.Server.World.Managers
         private int nextNetworkId = 1;
 
         private readonly Dictionary<NetPeer, int> peerToId = new();
+        private readonly Dictionary<int, NetPeer> idToPeer = new();
         private readonly Dictionary<int, int> idToAccount = new();
         private readonly Dictionary<int, Vector3> positions = new();
         private readonly Dictionary<int, long> idToCharacterId = new();
@@ -30,6 +33,7 @@ namespace ArcheCore.Server.World.Managers
         private readonly ConcurrentQueue<Action> pendingActions = new();
         private readonly SpawnManager _spawnManager;
         private readonly ReplicationManager _replication;
+        private readonly InterestManager _interest = new();
         private readonly LuaEngine luaEngine = new();
         private readonly WorldServerConfig _worldConfig;
         private readonly PersistenceClient _persistence;
@@ -43,6 +47,9 @@ namespace ArcheCore.Server.World.Managers
             Path.Combine(AppContext.BaseDirectory, "Lua","Server");
 
         public IReadOnlyDictionary<NetPeer, int> PeerToId => peerToId;
+
+        public bool TryGetPeer(int networkId, out NetPeer peer) =>
+            idToPeer.TryGetValue(networkId, out peer);
 
         public Dictionary<int, Vector3> Positions => positions;
 
@@ -133,18 +140,6 @@ namespace ArcheCore.Server.World.Managers
 
             _spawnManager.SendWorldToPeer(peer);
 
-            foreach (var kvp in peerToId)
-            {
-                if (kvp.Value == newId)
-                    continue;
-
-                W2CSpawnPlayerPacketSender.Send(
-                    _replication,
-                    peer,
-                    kvp.Value,
-                    positions[kvp.Value],
-                    false);
-            }
             _demoManager.OnPlayerJoin(peer);
         }
 
@@ -199,7 +194,16 @@ namespace ArcheCore.Server.World.Managers
                 accountToPeer.Remove(accountId);
             }
 
+            var knownByPeers =
+                _interest.GetKnownBy(networkId)
+                    .Select(id => TryGetPeer(id, out var p) ? p : null)
+                    .Where(p => p != null)
+                    .ToList();
+
+            _interest.Remove(networkId);
+
             peerToId.Remove(peer);
+            idToPeer.Remove(networkId);
             idToAccount.Remove(networkId);
             positions.Remove(networkId);
             idToCharacterId.Remove(networkId);
@@ -211,7 +215,7 @@ namespace ArcheCore.Server.World.Managers
 
             W2CPlayerLeavePacketSender.Send(
                 _replication,
-                peerToId.Keys,
+                knownByPeers,
                 networkId);
         }
 
@@ -222,9 +226,57 @@ namespace ArcheCore.Server.World.Managers
         {
             positions[networkId] = position;
 
+            var (entered, left) =
+                _interest.UpdatePosition(networkId, position);
+
+            foreach (var otherId in entered)
+            {
+                if (!TryGetPeer(otherId, out var otherPeer))
+                    continue;
+
+                // This mover just became visible to otherPeer - spawn them there.
+                W2CSpawnPlayerPacketSender.Send(
+                    _replication,
+                    otherPeer,
+                    networkId,
+                    position,
+                    false);
+
+                // otherId just became visible to the mover - spawn it back.
+                W2CSpawnPlayerPacketSender.Send(
+                    _replication,
+                    sender,
+                    otherId,
+                    positions.GetValueOrDefault(otherId),
+                    false);
+            }
+
+            foreach (var otherId in left)
+            {
+                if (!TryGetPeer(otherId, out var otherPeer))
+                    continue;
+
+                // Out of range both directions - despawn on both sides so
+                // nothing lingers client-side.
+                W2CPlayerLeavePacketSender.Send(
+                    _replication,
+                    new[] { otherPeer },
+                    networkId);
+
+                W2CPlayerLeavePacketSender.Send(
+                    _replication,
+                    new[] { sender },
+                    otherId);
+            }
+
+            var knownByPeers =
+                _interest.GetKnownBy(networkId)
+                    .Select(id => TryGetPeer(id, out var p) ? p : null)
+                    .Where(p => p != null);
+
             W2CPlayerPositionPacketSender.SendUnreliable(
                 _replication,
-                peerToId.Keys,
+                knownByPeers,
                 sender,
                 networkId,
                 position);
@@ -244,6 +296,7 @@ namespace ArcheCore.Server.World.Managers
                     character.Z);
 
             peerToId[peer] = networkId;
+            idToPeer[networkId] = peer;
 
             idToAccount[networkId] = accountId;
 
@@ -258,14 +311,37 @@ namespace ArcheCore.Server.World.Managers
             idToLevel[networkId] =
                 character.Level;
 
-            foreach (var p in peerToId)
+            // Tell the new player about themself first.
+            W2CSpawnPlayerPacketSender.Send(
+                _replication,
+                peer,
+                networkId,
+                spawn,
+                true);
+
+            var (entered, _) =
+                _interest.UpdatePosition(networkId, spawn);
+
+            foreach (var otherId in entered)
             {
+                if (!TryGetPeer(otherId, out var otherPeer))
+                    continue;
+
+                // Tell the new player about this nearby existing player.
                 W2CSpawnPlayerPacketSender.Send(
                     _replication,
-                    p.Key,
+                    peer,
+                    otherId,
+                    positions[otherId],
+                    false);
+
+                // Tell that existing player about the new arrival.
+                W2CSpawnPlayerPacketSender.Send(
+                    _replication,
+                    otherPeer,
                     networkId,
                     spawn,
-                    p.Key == peer);
+                    false);
             }
 
             Logger.Info(
@@ -312,6 +388,34 @@ namespace ArcheCore.Server.World.Managers
             }
 
             return -1;
+        }
+
+        // --- Interaction system ---
+
+        // Builds the same LuaPlayer wrapper HandlePlayerConnected already
+        // builds for OnConnect. Kept here since PlayerManager already owns
+        // peerToId/idToAccount - handlers shouldn't reach into those maps
+        // directly.
+        public LuaPlayer CreateLuaPlayer(NetPeer peer)
+        {
+            if (!peerToId.TryGetValue(peer, out int networkId))
+                return null;
+
+            int accountId = idToAccount.GetValueOrDefault(networkId, -1);
+
+            return new LuaPlayer(peer, networkId, accountId, _replication);
+        }
+
+        // PlayerManager owns the LuaEngine instance, so it's the one place
+        // that can fire hooks. C2WInteractHandler calls this after it's
+        // already validated range - this method trusts its caller.
+        public void FireInteractEvent(LuaPlayer player, IInteractable target)
+        {
+            luaEngine.FireEvent(
+                PlayerEvent.OnInteract,
+                player,
+                target.TemplateId,
+                (int)target.Kind);
         }
     }
 }

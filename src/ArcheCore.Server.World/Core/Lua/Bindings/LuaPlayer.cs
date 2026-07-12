@@ -35,5 +35,22 @@ namespace ArcheCore.Server.World.Lua.Scripting.Bindings
         {
             peer.Disconnect();
         }
+
+        // --- Interaction system ---
+
+        // Called from an OnInteract Lua hook, e.g.:
+        //   player:SendDialogue("Guard", "Halt! State your business.")
+        public void SendDialogue(string speakerName, string text)
+        {
+            W2CInteractDialoguePacketSender.Send(peer, speakerName, text);
+        }
+
+        // Placeholder until a real inventory system exists - this only
+        // sends a client-side message, it does not grant an item.
+        //   player:SendLootMessage("Rusty Sword")
+        public void SendLootMessage(string itemName)
+        {
+            W2CInteractLootPacketSender.Send(peer, itemName);
+        }
     }
 }

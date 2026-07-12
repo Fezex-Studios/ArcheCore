@@ -13,5 +13,6 @@ namespace ArcheCore.Network.Shared.Packets.W2C
         public float  X;
         public float  Y;
         public float  Z;
+        public float InteractRange;
     }
 }

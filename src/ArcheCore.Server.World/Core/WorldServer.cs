@@ -36,6 +36,7 @@ public class WorldServer : IHostedService,INetEventListener
     private PlayerManager _playerManager;
     private SpawnManager _spawnManager;
     private ReplicationManager _replicationManager;
+    private InteractionRegistry _interactions;
     private CancellationTokenSource _tickCts;
     private PersistenceClient _persistenceClient;
     private DemoManager _demoManager;
@@ -86,7 +87,8 @@ public class WorldServer : IHostedService,INetEventListener
 
         // 2. Initialize managers
         _replicationManager = new ReplicationManager();
-        _spawnManager = new SpawnManager(_replicationManager, _dbFactory);  // pass factory
+        _interactions = new InteractionRegistry();
+        _spawnManager = new SpawnManager(_replicationManager, _dbFactory, _interactions);  // pass registry
         _playerManager = new PlayerManager(_spawnManager, _replicationManager, _world,_persistenceClient,_demoManager);
         _playerManager.InitializeScripts();
 
@@ -144,6 +146,9 @@ public class WorldServer : IHostedService,INetEventListener
         _packetDispatcher.Register(
             Opcodes.C2WCreateCharacterRequest,
             new C2WCreateCharacterHandler(_playerManager, _persistenceClient));
+        _packetDispatcher.Register(
+            Opcodes.Interact,
+            new C2WInteractHandler(_playerManager, _interactions));
     }
         
     

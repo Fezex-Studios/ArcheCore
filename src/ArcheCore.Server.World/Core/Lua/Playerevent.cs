@@ -12,5 +12,6 @@
         OnLevelUp    = 3,
         OnChat       = 4,
         OnDeath      = 5,
+        OnInteract   = 6,
     }
 }

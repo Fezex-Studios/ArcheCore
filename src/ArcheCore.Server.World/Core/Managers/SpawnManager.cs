@@ -22,11 +22,12 @@ public class SpawnManager
 
     public SpawnManager(
         ReplicationManager replication,
-        IDbContextFactory<WorldDataDbContext> dbFactory)
+        IDbContextFactory<WorldDataDbContext> dbFactory,
+        InteractionRegistry interactions)
     {
         _replication = replication;
         _dbFactory   = dbFactory;
-        _npcSpawner  = new NpcSpawner(replication);
+        _npcSpawner  = new NpcSpawner(replication, interactions);
     }
 
     public void SpawnInitialObjects()
