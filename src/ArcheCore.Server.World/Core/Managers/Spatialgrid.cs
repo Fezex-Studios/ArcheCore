@@ -8,7 +8,7 @@ namespace ArcheCore.Server.World.Managers
     /// Buckets entities into cells on the XZ plane so "who's near this position"
     /// is a handful of dictionary lookups instead of scanning every entity.
     /// Not thread-safe - call from the same thread that owns PlayerManager's state
-    /// (matches how positions/peerToId are already accessed).
+    /// (matches how player sessions are already accessed, via peer.Tag).
     /// </summary>
     public class SpatialGrid
     {

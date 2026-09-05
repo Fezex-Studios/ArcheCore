@@ -34,7 +34,9 @@ namespace ArcheCore.Server.World.Networking.C2W
                 .Deserialize<C2WCreateCharacterRequest>(
                     reader.GetRemainingBytes());
 
-            if (!_playerManager.TryGetPendingAccountId(peer, out int accountId))
+            
+            var accountId = _playerManager.GetPendingAccountId(peer);
+            if (accountId is null)
             {
                 Logger.Warn(
                     "[CreateCharacter] Peer has no pending selection — disconnecting");
@@ -52,7 +54,7 @@ namespace ArcheCore.Server.World.Networking.C2W
                 return;
             }
 
-            _ = CreateAndSpawn(peer, accountId, name);
+            _ = CreateAndSpawn(peer, accountId.Value, name);
         }
 
         private async Task CreateAndSpawn(
@@ -75,8 +77,9 @@ namespace ArcheCore.Server.World.Networking.C2W
                 $"[CreateCharacter] Created '{response.Name}' " +
                 $"AccountId={accountId}");
 
-            _playerManager.ClearPendingCreation(peer);
-
+            // No explicit "clear pending" step needed anymore - the peer
+            // stops being pending the moment SpawnPlayer assigns it a
+            // NetworkId inside HandlePlayerConnected below.
             var characterData = new P2WCharacterLoadResponse
             {
                 Found       = true,

@@ -22,14 +22,11 @@ namespace ArcheCore.Server.World.Managers
     {
         private int nextNetworkId = 1;
 
-        private readonly Dictionary<NetPeer, int> peerToId = new();
+        // Reverse indexes only - these can't live on PlayerSession because
+        // they map FROM an id TO a peer, not the other way around.
         private readonly Dictionary<int, NetPeer> idToPeer = new();
-        private readonly Dictionary<int, int> idToAccount = new();
-        private readonly Dictionary<int, Vector3> positions = new();
-        private readonly Dictionary<int, long> idToCharacterId = new();
-        private readonly Dictionary<int, string> idToName = new();
-        private readonly Dictionary<int, int> idToLevel = new();
         private readonly Dictionary<int, NetPeer> accountToPeer = new();
+
         private readonly ConcurrentQueue<Action> pendingActions = new();
         private readonly SpawnManager _spawnManager;
         private readonly ReplicationManager _replication;
@@ -38,24 +35,15 @@ namespace ArcheCore.Server.World.Managers
         private readonly WorldServerConfig _worldConfig;
         private readonly PersistenceClient _persistence;
         private readonly DemoManager _demoManager;
-
-        // Authenticated, but not yet in-world: peer -> accountId. Covers
-        // both the "no characters yet, show create" and "pick a character"
-        // states — both need to know which account owns the peer before
-        // anything spawns.
-        private readonly Dictionary<NetPeer, int> _pendingSelection = new();
+        public InterestManager Interest => _interest;
 
         private static readonly Logger Logger =
             LogManager.GetCurrentClassLogger();
         public static string Lua =>
             Path.Combine(AppContext.BaseDirectory, "Lua", "Server");
 
-        public IReadOnlyDictionary<NetPeer, int> PeerToId => peerToId;
-
         public bool TryGetPeer(int networkId, out NetPeer peer) =>
             idToPeer.TryGetValue(networkId, out peer);
-
-        public Dictionary<int, Vector3> Positions => positions;
 
         public PlayerManager(
             SpawnManager spawnManager,
@@ -97,19 +85,104 @@ namespace ArcheCore.Server.World.Managers
             pendingActions.Enqueue(action);
         }
 
+        // --- Session lookup helpers ---
+        // All per-player state now lives on peer.Tag as a PlayerSession.
+        // These are the only places that touch peer.Tag directly - every
+        // handler goes through one of these instead of casting Tag itself.
+
+        public bool TryGetSession(NetPeer peer, out PlayerSession session)
+        {
+            if (peer.Tag is PlayerSession s)
+            {
+                session = s;
+                return true;
+            }
+
+            session = null;
+            return false;
+        }
+
+        private bool TryGetSessionByNetworkId(int networkId, out PlayerSession session)
+        {
+            if (idToPeer.TryGetValue(networkId, out var peer) &&
+                peer.Tag is PlayerSession s)
+            {
+                session = s;
+                return true;
+            }
+
+            session = null;
+            return false;
+        }
+
+        public bool TryGetNetworkId(NetPeer peer, out int networkId)
+        {
+            if (peer.Tag is PlayerSession { NetworkId: int id })
+            {
+                networkId = id;
+                return true;
+            }
+
+            networkId = -1;
+            return false;
+        }
+        public IEnumerable<NetPeer> GetAllConnectedPeers()
+        {
+            return idToPeer.Values;
+        }
+
+        public bool TryGetPeerByName(string name, out NetPeer peer)
+        {
+            foreach (var kvp in idToPeer)
+            {
+                if (kvp.Value.Tag is PlayerSession s &&
+                    string.Equals(s.Name, name, System.StringComparison.OrdinalIgnoreCase))
+                {
+                    peer = kvp.Value;
+                    return true;
+                }
+            }
+
+            peer = null;
+            return false;
+        }
+
+        public bool TryGetPosition(int networkId, out Vector3 position)
+        {
+            if (TryGetSessionByNetworkId(networkId, out var session))
+            {
+                position = session.Position;
+                return true;
+            }
+
+            position = default;
+            return false;
+        }
+
+        // --- Login flow: authenticated, not yet in-world ---
+
+        /// <summary>
+        /// Call once a token has been validated. Creates a session for this
+        /// peer with no NetworkId yet - that's what "pending" means. Covers
+        /// both the "no characters yet, show create" and "pick a character"
+        /// states, since both just need to know which account owns the peer
+        /// before anything spawns.
+        /// </summary>
         public void TrackPendingSelection(NetPeer peer, int accountId)
         {
-            _pendingSelection[peer] = accountId;
+            peer.Tag = new PlayerSession { AccountId = accountId };
         }
 
-        public bool TryGetPendingAccountId(NetPeer peer, out int accountId)
+        /// <summary>
+        /// True only for a peer that authenticated but hasn't spawned yet
+        /// (session exists, NetworkId is still null). A peer that's already
+        /// in-world, or never authenticated at all, returns false here.
+        /// </summary>
+        public int? GetPendingAccountId(NetPeer peer)
         {
-            return _pendingSelection.TryGetValue(peer, out accountId);
-        }
-
-        public void ClearPendingCreation(NetPeer peer)
-        {
-            _pendingSelection.Remove(peer);
+            return peer.Tag is PlayerSession { NetworkId: null } session
+                ? session.AccountId
+                : null;
         }
 
         public void HandlePlayerConnected(
@@ -156,46 +229,30 @@ namespace ArcheCore.Server.World.Managers
             NetPeer peer,
             bool save)
         {
-            if (!peerToId.TryGetValue(peer, out int networkId))
+            // Peer never made it past character select (or never
+            // authenticated at all) - nothing spawned, nothing to clean up.
+            // Tag either holds no session, or a pending one with no
+            // NetworkId; either way it's dropped when the peer object is,
+            // no explicit removal required.
+            if (peer.Tag is not PlayerSession { NetworkId: int networkId } session)
                 return;
 
-            int accountId =
-                idToAccount.GetValueOrDefault(networkId);
-
-            if (save &&
-                idToCharacterId.TryGetValue(
-                    networkId,
-                    out long characterId))
+            if (save)
             {
-                string name =
-                    idToName.GetValueOrDefault(
-                        networkId,
-                        "Unknown");
-
-                int level =
-                    idToLevel.GetValueOrDefault(
-                        networkId,
-                        1);
-
-                Vector3 pos =
-                    positions.GetValueOrDefault(
-                        networkId,
-                        Vector3.Zero);
-
                 _ = SaveCharacterAsync(
-                    characterId,
-                    accountId,
-                    name,
-                    level,
-                    pos);
+                    session.CharacterId,
+                    session.AccountId,
+                    session.Name,
+                    session.Level,
+                    session.Position);
             }
 
             if (accountToPeer.TryGetValue(
-                    accountId,
+                    session.AccountId,
                     out var registered)
                 && registered == peer)
             {
-                accountToPeer.Remove(accountId);
+                accountToPeer.Remove(session.AccountId);
             }
 
             var knownByPeers =
@@ -206,13 +263,8 @@ namespace ArcheCore.Server.World.Managers
 
             _interest.Remove(networkId);
 
-            peerToId.Remove(peer);
             idToPeer.Remove(networkId);
-            idToAccount.Remove(networkId);
-            positions.Remove(networkId);
-            idToCharacterId.Remove(networkId);
-            idToName.Remove(networkId);
-            idToLevel.Remove(networkId);
+            peer.Tag = null;
 
             Logger.Info(
                 $"Disconnected player {networkId}");
@@ -228,7 +280,8 @@ namespace ArcheCore.Server.World.Managers
             int networkId,
             Vector3 position)
         {
-            positions[networkId] = position;
+            if (sender.Tag is PlayerSession senderSession)
+                senderSession.Position = position;
 
             var (entered, left) =
                 _interest.UpdatePosition(networkId, position);
@@ -245,11 +298,13 @@ namespace ArcheCore.Server.World.Managers
                     position,
                     false);
 
+                TryGetPosition(otherId, out Vector3 otherPos);
+
                 W2CSpawnPlayerPacketSender.Send(
                     _replication,
                     sender,
                     otherId,
-                    positions.GetValueOrDefault(otherId),
+                    otherPos,
                     false);
             }
 
@@ -295,21 +350,22 @@ namespace ArcheCore.Server.World.Managers
                     character.Y,
                     character.Z);
 
-            peerToId[peer] = networkId;
+            // Session was created back in TrackPendingSelection; fill in
+            // everything that was missing until now. Assigning NetworkId
+            // here is what turns "pending" into "in-world" - nothing else
+            // needs to explicitly clear the pending state.
+            var session = peer.Tag as PlayerSession
+                ?? new PlayerSession { AccountId = accountId };
+
+            session.NetworkId   = networkId;
+            session.CharacterId = character.CharacterId;
+            session.Name        = character.Name;
+            session.Level       = character.Level;
+            session.Position    = spawn;
+
+            peer.Tag = session;
+
             idToPeer[networkId] = peer;
-
-            idToAccount[networkId] = accountId;
-
-            positions[networkId] = spawn;
-
-            idToCharacterId[networkId] =
-                character.CharacterId;
-
-            idToName[networkId] =
-                character.Name;
-
-            idToLevel[networkId] =
-                character.Level;
 
             W2CSpawnPlayerPacketSender.Send(
                 _replication,
@@ -326,11 +382,13 @@ namespace ArcheCore.Server.World.Managers
                 if (!TryGetPeer(otherId, out var otherPeer))
                     continue;
 
+                TryGetPosition(otherId, out Vector3 otherPos);
+
                 W2CSpawnPlayerPacketSender.Send(
                     _replication,
                     peer,
                     otherId,
-                    positions[otherId],
+                    otherPos,
                     false);
 
                 W2CSpawnPlayerPacketSender.Send(
@@ -348,55 +406,35 @@ namespace ArcheCore.Server.World.Managers
         }
 
         private async Task SaveCharacterAsync(
-            long characterId,
-            int accountId,
-            string name,
-            int level,
-            Vector3 pos)
+            long characterId, int accountId, string name, int level, Vector3 pos)
         {
-            await _persistence.W2PCharacter.Save(
-                characterId,
-                accountId,
-                name,
-                level,
-                pos.X,
-                pos.Y,
-                pos.Z
-            );
-        }
-
-        public int GetLevel(NetPeer peer)
-        {
-            if (peerToId.TryGetValue(peer, out var id) &&
-                idToLevel.TryGetValue(id, out var level))
+            try
             {
-                return level;
+                await _persistence.W2PCharacter.Save(
+                    characterId, accountId, name, level, pos.X, pos.Y, pos.Z);
+
+                Logger.Info($"[Save] CharacterId={characterId} saved successfully.");
             }
-
-            return -1;
-        }
-
-        public long GetCharacterId(NetPeer peer)
-        {
-            if (peerToId.TryGetValue(peer, out var networkId) &&
-                idToCharacterId.TryGetValue(networkId, out var characterId))
+            catch (Exception ex)
             {
-                return characterId;
+                Logger.Error(ex, $"[Save] FAILED to save CharacterId={characterId}");
             }
-
-            return -1;
         }
+
+        public int GetLevel(NetPeer peer) =>
+            peer.Tag is PlayerSession session ? session.Level : -1;
+
+        public long GetCharacterId(NetPeer peer) =>
+            peer.Tag is PlayerSession session ? session.CharacterId : -1;
 
         // --- Interaction system ---
 
         public LuaPlayer CreateLuaPlayer(NetPeer peer)
         {
-            if (!peerToId.TryGetValue(peer, out int networkId))
+            if (peer.Tag is not PlayerSession { NetworkId: int networkId } session)
                 return null;
 
-            int accountId = idToAccount.GetValueOrDefault(networkId, -1);
-
-            return new LuaPlayer(peer, networkId, accountId, _replication);
+            return new LuaPlayer(peer, networkId, session.AccountId, _replication);
         }
 
         public void FireInteractEvent(LuaPlayer player, IInteractable target)
