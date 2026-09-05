@@ -83,5 +83,9 @@ namespace ArcheCore.Server.World.Managers
                 ? set
                 : Enumerable.Empty<int>();
         }
+        public IEnumerable<int> GetNearbyAtRadius(int networkId, int radiusCells)
+        {
+            return _grid.GetNearby(networkId, radiusCells);
+        }
     }
 }
