@@ -24,9 +24,11 @@ export async function W2PCharacterLoadHandler(
 {
     const request = decode(payload) as W2PCharacterLoadRequest;
 
-    const row = db.prepare(`
-        SELECT * FROM characters WHERE account_id = ?
-    `).get(request.AccountId) as CharacterRow;
+    const row = request.CharacterId > 0
+        ? db.prepare(`SELECT * FROM characters WHERE account_id = ? AND character_id = ?`)
+            .get(request.AccountId, request.CharacterId) as CharacterRow
+        : db.prepare(`SELECT * FROM characters WHERE account_id = ?`)
+            .get(request.AccountId) as CharacterRow;
 
     if (!row)
     {

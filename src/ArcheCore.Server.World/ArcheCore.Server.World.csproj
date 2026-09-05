@@ -32,7 +32,6 @@
       <Folder Include="Core\Lua\DeveloperSDK\" />
       <Folder Include="Core\Network\" />
       <Folder Include="Core\PersistenceServer\" />
-      <Folder Include="Data\" />
       <Folder Include="LuaSDK\" />
       <Folder Include="Physics\" />
       <Folder Include="Services\" />

@@ -14,7 +14,15 @@ namespace ArcheCore.Server.World.PersistenceServer.Senders
         public W2PCharacterSender(PersistenceClient client)
             => _client = client;
 
+        // Legacy path: loads whatever character exists for the account,
+        // ignoring which one. Kept for compatibility, but the auth flow
+        // no longer uses this — it uses LoadList instead.
         public async Task<P2WCharacterLoadResponse> Load(int accountId)
+            => await Load(accountId, 0);
+
+        // Selection path: loads a specific character, enforcing ownership
+        // via AccountId server-side (both fields are checked in the SQL).
+        public async Task<P2WCharacterLoadResponse> Load(int accountId, long characterId)
         {
             var tcs = new TaskCompletionSource<P2WCharacterLoadResponse>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
@@ -23,7 +31,11 @@ namespace ArcheCore.Server.World.PersistenceServer.Senders
 
             await _client.Send(
                 PServerOpcodes.CharacterLoad,
-                new W2PCharacterLoadRequest { AccountId = accountId });
+                new W2PCharacterLoadRequest
+                {
+                    AccountId   = accountId,
+                    CharacterId = characterId
+                });
 
             return await tcs.Task;
         }
@@ -42,6 +54,20 @@ namespace ArcheCore.Server.World.PersistenceServer.Senders
                     AccountId = accountId,
                     Name      = name
                 });
+
+            return await tcs.Task;
+        }
+
+        public async Task<P2WCharacterListResponse> LoadList(int accountId)
+        {
+            var tcs = new TaskCompletionSource<P2WCharacterListResponse>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+
+            _client.pendingLists[accountId] = tcs;
+
+            await _client.Send(
+                PServerOpcodes.CharacterList,
+                new W2PCharacterListRequest { AccountId = accountId });
 
             return await tcs.Task;
         }

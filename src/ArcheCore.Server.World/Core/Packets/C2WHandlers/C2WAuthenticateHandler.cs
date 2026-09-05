@@ -1,5 +1,4 @@
-﻿
-using ArcheCore.Library.Net.Worldserver;
+﻿using ArcheCore.Library.Net.Worldserver;
 using ArcheCore.Network.Shared.Packets.C2W;
 using ArcheCore.Network.Shared.Packets.PersistenceServer.P2W;
 using ArcheCore.Network.Shared.Packets.W2C;
@@ -12,21 +11,19 @@ using NLog;
 using Shared.AuthService;
 using Worldserver.ArcheCore.PersistenceServer.Scripts;
 
-
 namespace ArcheCore.Server.World.Networking.C2W
 {
     public class C2WAuthenticateHandler : IPacketHandler
     {
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
         private readonly PlayerManager playerManager;
-        private readonly AuthService authService; 
+        private readonly AuthService authService;
         private readonly PersistenceClient persistence;
-
 
         public C2WAuthenticateHandler(PlayerManager playerManager, AuthService authService, PersistenceClient persistence)
         {
             this.playerManager = playerManager;
-            this.authService = authService;  // was assigning null before
+            this.authService = authService;
             this.persistence = persistence;
         }
 
@@ -60,35 +57,32 @@ namespace ArcheCore.Server.World.Networking.C2W
             }
 
             Logger.Info(
-                $"[C2WAuthenticateHandler] Token valid. AccountId={accountId} — loading character.");
+                $"[C2WAuthenticateHandler] Token valid. AccountId={accountId} — fetching character list.");
 
-            P2WCharacterLoadResponse p2WCharacter =
-                await persistence.W2PCharacter.Load(accountId);
-
-            if (!p2WCharacter.Found)
-            {
-                Logger.Warn(
-                    $"[C2WAuthenticateHandler] No character for AccountId={accountId} " +
-                    $"— sending CharacterNotFound");
-
-                playerManager.EnqueueAction(() =>
-                {
-                    playerManager.TrackPendingCreation(peer, accountId);
-
-                    WorldserverPacketSender.SendPacket(
-                        peer,
-                        Opcodes.W2CCharacterNotFound,
-                        new W2CCharacterNotFoundPacket());
-                });
-
-                return;
-            }
+            // No more auto-load-and-spawn. We always fetch the roster and
+            // let the client decide: empty list -> create, 1+ -> select.
+            P2WCharacterListResponse list =
+                await persistence.W2PCharacter.LoadList(accountId);
 
             Logger.Info(
-                $"[C2WAuthenticateHandler] Character loaded: {p2WCharacter.Name} — spawning.");
+                $"[C2WAuthenticateHandler] AccountId={accountId} has {list.Characters?.Length ?? 0} character(s).");
 
             playerManager.EnqueueAction(() =>
-                playerManager.HandlePlayerConnected(peer, accountId, p2WCharacter));
+            {
+                // Peer is authenticated but hasn't entered world yet —
+                // tracked the same way for both the create-flow and the
+                // select-flow, since both need to know which account this
+                // peer belongs to before they're allowed to spawn.
+                playerManager.TrackPendingSelection(peer, accountId);
+
+                WorldserverPacketSender.SendPacket(
+                    peer,
+                    Opcodes.W2CCharacterList,
+                    new W2CCharacterListPacket
+                    {
+                        Characters = list.Characters ?? System.Array.Empty<Network.Shared.Packets.PersistenceServer.P2W.CharacterSummary>()
+                    });
+            });
         }
     }
 }

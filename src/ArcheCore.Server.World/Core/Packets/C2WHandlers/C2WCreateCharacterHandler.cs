@@ -37,7 +37,7 @@ namespace ArcheCore.Server.World.Networking.C2W
             if (!_playerManager.TryGetPendingAccountId(peer, out int accountId))
             {
                 Logger.Warn(
-                    "[CreateCharacter] Peer has no pending creation — disconnecting");
+                    "[CreateCharacter] Peer has no pending selection — disconnecting");
                 peer.Disconnect();
                 return;
             }
@@ -51,8 +51,6 @@ namespace ArcheCore.Server.World.Networking.C2W
                 peer.Disconnect();
                 return;
             }
-
-            _playerManager.ClearPendingCreation(peer);
 
             _ = CreateAndSpawn(peer, accountId, name);
         }
@@ -76,6 +74,8 @@ namespace ArcheCore.Server.World.Networking.C2W
             Logger.Info(
                 $"[CreateCharacter] Created '{response.Name}' " +
                 $"AccountId={accountId}");
+
+            _playerManager.ClearPendingCreation(peer);
 
             var characterData = new P2WCharacterLoadResponse
             {
