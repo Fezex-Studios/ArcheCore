@@ -29,7 +29,7 @@ namespace ArcheCore.Server.World.Networking.C2W
                     .Deserialize<C2WInteractPacket>(
                         reader.GetRemainingBytes());
 
-            if (!playerManager.PeerToId.TryGetValue(peer, out int playerId))
+            if (!playerManager.TryGetNetworkId(peer, out int playerId))
                 return;
 
             // Target may have despawned/been looted between the client's
@@ -40,7 +40,7 @@ namespace ArcheCore.Server.World.Networking.C2W
                 return;
             }
 
-            if (!playerManager.Positions.TryGetValue(playerId, out Vector3 playerPos))
+            if (!playerManager.TryGetPosition(playerId, out Vector3 playerPos))
                 return;
 
             float distance = Vector3.Distance(playerPos, target.Position);

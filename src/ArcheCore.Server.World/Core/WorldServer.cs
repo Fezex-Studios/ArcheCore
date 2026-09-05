@@ -125,8 +125,15 @@ public class WorldServer : IHostedService,INetEventListener
 
         while (!ct.IsCancellationRequested && await timer.WaitForNextTickAsync(ct))
         {
-            _playerManager.DrainActions();
-            _server?.PollEvents();
+            try
+            {
+                _playerManager.DrainActions();
+                _server?.PollEvents();
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "[TickLoop] Unhandled exception in tick — continuing.");
+            }
         }
     }
 
@@ -142,17 +149,10 @@ public class WorldServer : IHostedService,INetEventListener
         _packetDispatcher.Register(Opcodes.Authenticate, new C2WAuthenticateHandler(_playerManager, _authService, _persistenceClient));
         _packetDispatcher.Register(Opcodes.PlayerMove,   new C2WMovementHandler(_playerManager));
         _packetDispatcher.Register(Opcodes.RequestPlayerLevel, new C2WRequestPlayerLevelHandler(_playerManager));
-        _packetDispatcher.Register(
-            Opcodes.C2WCreateCharacterRequest,
-            new C2WCreateCharacterHandler(_playerManager, _persistenceClient));
-        _packetDispatcher.Register(
-            Opcodes.Interact,
-            new C2WInteractHandler(_playerManager, _interactions));
-
-        // NEW
-        _packetDispatcher.Register(
-            Opcodes.C2WSelectCharacter,
-            new C2WSelectCharacterHandler(_playerManager, _persistenceClient));
+        _packetDispatcher.Register(Opcodes.C2WCreateCharacterRequest, new C2WCreateCharacterHandler(_playerManager, _persistenceClient));
+        _packetDispatcher.Register(Opcodes.Interact, new C2WInteractHandler(_playerManager, _interactions));
+        _packetDispatcher.Register(Opcodes.C2WSelectCharacter, new C2WSelectCharacterHandler(_playerManager, _persistenceClient));
+        _packetDispatcher.Register(Opcodes.ChatMessage, new C2WChatHandler(_playerManager, _playerManager.Interest, _replicationManager));
     }
         
     
