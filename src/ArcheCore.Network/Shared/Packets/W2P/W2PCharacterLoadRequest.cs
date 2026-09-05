@@ -8,5 +8,6 @@ namespace ArcheCore.Network.Shared.Packets.PersistenceServer.W2P
     public class W2PCharacterLoadRequest
     {
         public long AccountId;
+        public long CharacterId;
     }
 }

@@ -30,6 +30,9 @@ namespace Worldserver.ArcheCore.PersistenceServer.Scripts
         internal readonly ConcurrentDictionary<int, TaskCompletionSource<P2WCreateCharacterResponse>>
             pendingCreates = new();
 
+        internal readonly ConcurrentDictionary<int, TaskCompletionSource<P2WCharacterListResponse>>
+            pendingLists = new();
+
         public W2PCharacterSender  W2PCharacter  { get; private set; }
         public W2PHelloWorldSender W2PHelloWorld { get; private set; }
 
@@ -77,10 +80,14 @@ namespace Worldserver.ArcheCore.PersistenceServer.Scripts
                 PServerOpcodes.CharacterLoad,
                 new P2WCharacterLoadHandler(this));
 
-            // NEW
             dispatcher.Register(
                 PServerOpcodes.P2WCharacterCreateResponse,
                 new P2WCharacterCreateResponseHandler(this));
+
+            // NEW
+            dispatcher.Register(
+                PServerOpcodes.P2WCharacterListResponse,
+                new P2WCharacterListResponseHandler(this));
         }
 
         public void ResolveLoad(P2WCharacterLoadResponse response)
@@ -99,6 +106,15 @@ namespace Worldserver.ArcheCore.PersistenceServer.Scripts
             else
                 Logger.Warn(
                     $"[PersistenceClient] No pending create for AccountId={response.AccountId}");
+        }
+
+        public void ResolveList(P2WCharacterListResponse response)
+        {
+            if (pendingLists.TryRemove(response.AccountId, out var tcs))
+                tcs.SetResult(response);
+            else
+                Logger.Warn(
+                    $"[PersistenceClient] No pending list for AccountId={response.AccountId}");
         }
 
         internal async Task Send<T>(PServerOpcodes opcode, T payload)

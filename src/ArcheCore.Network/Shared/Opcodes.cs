@@ -21,5 +21,7 @@
         W2CInteractDialogue        = 17, // W2C: NPC dialogue response
         W2CInteractLoot            = 18, // W2C: item pickup response (placeholder until inventory exists)
         W2CInteractDenied          = 19, // W2C: interaction rejected (out of range, target gone, etc.)
+        W2CCharacterList           = 20,
+        C2WSelectCharacter         = 21,
     }
 }

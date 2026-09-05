@@ -7,4 +7,6 @@ export enum ProtocolPersistence
     HelloWorld =5,
     CharacterCreate = 6,
     P2WCharacterCreateResponse = 7,
+    CharacterList = 8,
+    P2WCharacterListResponse=9,
 }

@@ -38,13 +38,17 @@ namespace ArcheCore.Server.World.Managers
         private readonly WorldServerConfig _worldConfig;
         private readonly PersistenceClient _persistence;
         private readonly DemoManager _demoManager;
-        private readonly Dictionary<NetPeer, int> _pendingCreation = new();
 
+        // Authenticated, but not yet in-world: peer -> accountId. Covers
+        // both the "no characters yet, show create" and "pick a character"
+        // states — both need to know which account owns the peer before
+        // anything spawns.
+        private readonly Dictionary<NetPeer, int> _pendingSelection = new();
 
         private static readonly Logger Logger =
             LogManager.GetCurrentClassLogger();
         public static string Lua =>
-            Path.Combine(AppContext.BaseDirectory, "Lua","Server");
+            Path.Combine(AppContext.BaseDirectory, "Lua", "Server");
 
         public IReadOnlyDictionary<NetPeer, int> PeerToId => peerToId;
 
@@ -59,7 +63,6 @@ namespace ArcheCore.Server.World.Managers
             WorldServerConfig worldConfig,
             PersistenceClient persistence,
             DemoManager demoManager
-            
             )
         {
             _spawnManager = spawnManager;
@@ -93,19 +96,20 @@ namespace ArcheCore.Server.World.Managers
         {
             pendingActions.Enqueue(action);
         }
-        public void TrackPendingCreation(NetPeer peer, int accountId)
+
+        public void TrackPendingSelection(NetPeer peer, int accountId)
         {
-            _pendingCreation[peer] = accountId;
+            _pendingSelection[peer] = accountId;
         }
 
         public bool TryGetPendingAccountId(NetPeer peer, out int accountId)
         {
-            return _pendingCreation.TryGetValue(peer, out accountId);
+            return _pendingSelection.TryGetValue(peer, out accountId);
         }
 
         public void ClearPendingCreation(NetPeer peer)
         {
-            _pendingCreation.Remove(peer);
+            _pendingSelection.Remove(peer);
         }
 
         public void HandlePlayerConnected(
@@ -234,7 +238,6 @@ namespace ArcheCore.Server.World.Managers
                 if (!TryGetPeer(otherId, out var otherPeer))
                     continue;
 
-                // This mover just became visible to otherPeer - spawn them there.
                 W2CSpawnPlayerPacketSender.Send(
                     _replication,
                     otherPeer,
@@ -242,7 +245,6 @@ namespace ArcheCore.Server.World.Managers
                     position,
                     false);
 
-                // otherId just became visible to the mover - spawn it back.
                 W2CSpawnPlayerPacketSender.Send(
                     _replication,
                     sender,
@@ -256,8 +258,6 @@ namespace ArcheCore.Server.World.Managers
                 if (!TryGetPeer(otherId, out var otherPeer))
                     continue;
 
-                // Out of range both directions - despawn on both sides so
-                // nothing lingers client-side.
                 W2CPlayerLeavePacketSender.Send(
                     _replication,
                     new[] { otherPeer },
@@ -311,7 +311,6 @@ namespace ArcheCore.Server.World.Managers
             idToLevel[networkId] =
                 character.Level;
 
-            // Tell the new player about themself first.
             W2CSpawnPlayerPacketSender.Send(
                 _replication,
                 peer,
@@ -327,7 +326,6 @@ namespace ArcheCore.Server.World.Managers
                 if (!TryGetPeer(otherId, out var otherPeer))
                     continue;
 
-                // Tell the new player about this nearby existing player.
                 W2CSpawnPlayerPacketSender.Send(
                     _replication,
                     peer,
@@ -335,7 +333,6 @@ namespace ArcheCore.Server.World.Managers
                     positions[otherId],
                     false);
 
-                // Tell that existing player about the new arrival.
                 W2CSpawnPlayerPacketSender.Send(
                     _replication,
                     otherPeer,
@@ -392,10 +389,6 @@ namespace ArcheCore.Server.World.Managers
 
         // --- Interaction system ---
 
-        // Builds the same LuaPlayer wrapper HandlePlayerConnected already
-        // builds for OnConnect. Kept here since PlayerManager already owns
-        // peerToId/idToAccount - handlers shouldn't reach into those maps
-        // directly.
         public LuaPlayer CreateLuaPlayer(NetPeer peer)
         {
             if (!peerToId.TryGetValue(peer, out int networkId))
@@ -406,9 +399,6 @@ namespace ArcheCore.Server.World.Managers
             return new LuaPlayer(peer, networkId, accountId, _replication);
         }
 
-        // PlayerManager owns the LuaEngine instance, so it's the one place
-        // that can fire hooks. C2WInteractHandler calls this after it's
-        // already validated range - this method trusts its caller.
         public void FireInteractEvent(LuaPlayer player, IInteractable target)
         {
             luaEngine.FireEvent(

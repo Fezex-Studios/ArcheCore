@@ -13,7 +13,7 @@ public class DemoService
 
     public Task RunService()
     {
-        Logger.Info("Started DemoService!");
+        Logger.Info("Started DemoServiceadasdsad!");
         return Task.CompletedTask;
     }
 }
