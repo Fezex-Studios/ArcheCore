@@ -2,6 +2,7 @@
 using ArcheCore.Server.World.Networking.W2C;
 using LiteNetLib;
 using MoonSharp.Interpreter;
+using NLog;
 
 namespace ArcheCore.Server.World.Lua.Scripting.Bindings
 {
@@ -10,6 +11,8 @@ namespace ArcheCore.Server.World.Lua.Scripting.Bindings
     {
         private readonly NetPeer            peer;
         private readonly ReplicationManager _replication;
+        private static readonly Logger Logger =
+            LogManager.GetCurrentClassLogger();
 
         public int NetworkId { get; }
         public int AccountId { get; }
@@ -42,7 +45,11 @@ namespace ArcheCore.Server.World.Lua.Scripting.Bindings
         //   player:SendDialogue("Guard", "Halt! State your business.")
         public void SendDialogue(string speakerName, string text)
         {
+            Logger.Info($"[LuaPlayer] SendDialogue: {speakerName} -> {text}");
+
             W2CInteractDialoguePacketSender.Send(peer, speakerName, text);
+
+            Logger.Info("[LuaPlayer] SendDialogue packet sender returned");
         }
 
         // Placeholder until a real inventory system exists - this only

@@ -1,4 +1,6 @@
-﻿using System.Numerics;
+using ArcheCore.Network.Shared;
+using ArcheCore.Library.Net.Worldserver;
+using System.Numerics;
 using ArcheCore.Network.Shared.Packets.C2W;
 using ArcheCore.Network.Worldserver;
 using ArcheCore.Server.World.Managers;
@@ -8,6 +10,7 @@ using MessagePack;
 
 namespace ArcheCore.Server.World.Networking.C2W
 {
+    [PacketOpcode(Opcodes.PlayerMove)]
     public class C2WMovementHandler : IPacketHandler
     {
         private readonly PlayerManager playerManager;
@@ -22,7 +25,7 @@ namespace ArcheCore.Server.World.Networking.C2W
             NetPeer peer,
             NetPacketReader reader)
         {
-            if (!playerManager.TryGetNetworkId(
+            if (!playerManager.PeerToId.TryGetValue(
                     peer,
                     out int networkId))
             {
@@ -39,10 +42,8 @@ namespace ArcheCore.Server.World.Networking.C2W
                 packet.y,
                 packet.z);
 
-            // BroadcastPosition updates the session's stored position
-            // itself now, so there's no separate dictionary write needed
-            // here (the old direct write to playerManager.Positions was
-            // redundant with what BroadcastPosition already did).
+            playerManager.Positions[networkId] = position;
+
             playerManager.BroadcastPosition(
                 peer,
                 networkId,

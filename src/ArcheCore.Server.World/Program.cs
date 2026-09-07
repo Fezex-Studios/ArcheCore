@@ -6,11 +6,11 @@ public class Program
 {
     public static void Main(string[] args)
     {
-        var builder = Host.CreateApplicationBuilder(args);
+        HostApplicationBuilder builder = Host.CreateApplicationBuilder(args);
 
         builder
             .UseWorldServer()
-            .AddDemoBootstrap();
+            .AddDemoBootstrap();    
 
         var host = builder.Build();
         host.Run();

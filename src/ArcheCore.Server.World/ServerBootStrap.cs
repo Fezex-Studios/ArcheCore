@@ -55,7 +55,6 @@ public static class ServerBootstrap
         // SERVICES
         // --------------------
         builder.Services.AddSingleton<GameDataPatchRunner>();
-
         builder.Services.AddHostedService<WorldServer>();
 
         

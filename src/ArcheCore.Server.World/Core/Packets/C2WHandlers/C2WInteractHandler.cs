@@ -1,3 +1,5 @@
+using ArcheCore.Network.Shared;
+using ArcheCore.Library.Net.Worldserver;
 using System.Numerics;
 using ArcheCore.Network.Shared.Packets.C2W;
 using ArcheCore.Network.Worldserver;
@@ -6,13 +8,18 @@ using ArcheCore.Server.World.Managers;
 using ArcheCore.Server.World.Networking.W2C;
 using LiteNetLib;
 using MessagePack;
+using NLog;
 
 namespace ArcheCore.Server.World.Networking.C2W
 {
+    [PacketOpcode(Opcodes.Interact)]
     public class C2WInteractHandler : IPacketHandler
     {
         private readonly PlayerManager playerManager;
         private readonly InteractionRegistry interactions;
+
+        private static readonly Logger Logger =
+            LogManager.GetCurrentClassLogger();
 
         public C2WInteractHandler(
             PlayerManager playerManager,
@@ -24,42 +31,88 @@ namespace ArcheCore.Server.World.Networking.C2W
 
         public void Handle(NetPeer peer, NetPacketReader reader)
         {
+            Logger.Info($"[Interact] C2WInteractHandler RECEIVED packet from {peer.Address}");
+
             C2WInteractPacket packet =
                 MessagePackSerializer
                     .Deserialize<C2WInteractPacket>(
                         reader.GetRemainingBytes());
 
-            if (!playerManager.TryGetNetworkId(peer, out int playerId))
-                return;
+            Logger.Info(
+                $"[Interact] TargetNetworkId={packet.TargetNetworkId}");
 
-            // Target may have despawned/been looted between the client's
-            // raycast and this packet arriving - that's normal, not an error.
-            if (!interactions.TryGet(packet.TargetNetworkId, out var target))
+            if (!playerManager.TryGetNetworkId(peer, out int playerId))
             {
-                W2CInteractDeniedPacketSender.Send(peer, "That's no longer there.");
+                Logger.Warn(
+                    $"[Interact] FAILED: Could not resolve player NetworkId for {peer.Address}");
                 return;
             }
 
-            if (!playerManager.TryGetPosition(playerId, out Vector3 playerPos))
+            Logger.Info(
+                $"[Interact] PlayerNetworkId={playerId}");
+
+            if (!interactions.TryGet(packet.TargetNetworkId, out var target))
+            {
+                Logger.Warn(
+                    $"[Interact] FAILED: NetworkId {packet.TargetNetworkId} not found in InteractionRegistry");
+
+                W2CInteractDeniedPacketSender.Send(
+                    peer,
+                    "That's no longer there.");
+
                 return;
+            }
+
+            Logger.Info(
+                $"[Interact] Target found: TemplateId={target.TemplateId}, " +
+                $"Kind={target.Kind}, " +
+                $"Position={target.Position}, " +
+                $"Range={target.InteractRange}");
+
+            if (!playerManager.TryGetPosition(playerId, out Vector3 playerPos))
+            {
+                Logger.Warn(
+                    $"[Interact] FAILED: Could not get player position for NetworkId={playerId}");
+                return;
+            }
+
+            Logger.Info(
+                $"[Interact] Player position={playerPos}");
 
             float distance = Vector3.Distance(playerPos, target.Position);
 
+            Logger.Info(
+                $"[Interact] Distance={distance:F2}, Allowed={target.InteractRange:F2}");
+
             if (distance > target.InteractRange)
             {
-                W2CInteractDeniedPacketSender.Send(peer, "Too far away.");
+                Logger.Warn(
+                    $"[Interact] DENIED: Too far away");
+
+                W2CInteractDeniedPacketSender.Send(
+                    peer,
+                    "Too far away.");
+
                 return;
             }
-            
+
             var luaPlayer = playerManager.CreateLuaPlayer(peer);
 
             if (luaPlayer == null)
+            {
+                Logger.Warn(
+                    $"[Interact] FAILED: CreateLuaPlayer returned null");
                 return;
+            }
 
-            // What actually happens (dialogue, loot, quest turn-in) is
-            // entirely up to whatever Lua script registered OnInteract -
-            // this handler doesn't know or care which one.
+            Logger.Info(
+                $"[Interact] FIRING OnInteract: TemplateId={target.TemplateId}, Kind={target.Kind}");
+
             playerManager.FireInteractEvent(luaPlayer, target);
+
+            Logger.Info(
+                $"[Interact] OnInteract finished");
+
         }
     }
 }

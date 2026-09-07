@@ -1,4 +1,5 @@
-﻿using ArcheCore.Library.Net.Worldserver;
+﻿using ArcheCore.Network.Shared;
+using ArcheCore.Library.Net.Worldserver;
 using ArcheCore.Network.Shared.Packets.C2W;
 using ArcheCore.Network.Shared.Packets.PersistenceServer.P2W;
 using ArcheCore.Network.Shared.Packets.W2C;
@@ -13,7 +14,8 @@ using Worldserver.ArcheCore.PersistenceServer.Scripts;
 
 namespace ArcheCore.Server.World.Networking.C2W
 {
-    public class C2WAuthenticateHandler : IPacketHandler
+    [PacketOpcode(Opcodes.Authenticate)]
+public class C2WAuthenticateHandler : IPacketHandler
     {
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
         private readonly PlayerManager playerManager;

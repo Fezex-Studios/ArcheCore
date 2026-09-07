@@ -1,3 +1,5 @@
+using ArcheCore.Network.Shared;
+using ArcheCore.Library.Net.Worldserver;
 using ArcheCore.Network.Shared.Packets.C2W;
 using ArcheCore.Network.Shared.Packets.W2C;
 using ArcheCore.Network.Worldserver;
@@ -10,6 +12,7 @@ using Worldserver.ArcheCore.PersistenceServer.Scripts;
 
 namespace ArcheCore.Server.World.Networking.C2W;
 
+[PacketOpcode(Opcodes.RequestPlayerLevel)]
 public class C2WRequestPlayerLevelHandler: IPacketHandler
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();

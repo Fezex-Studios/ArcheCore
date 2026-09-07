@@ -1,3 +1,5 @@
+using ArcheCore.Network.Shared;
+using ArcheCore.Library.Net.Worldserver;
 using System.Threading.Tasks;
 using ArcheCore.Network.Shared.Packets.C2W;
 using ArcheCore.Network.Shared.Packets.PersistenceServer.P2W;
@@ -12,7 +14,8 @@ using Worldserver.ArcheCore.PersistenceServer.Scripts;
 
 namespace ArcheCore.Server.World.Networking.C2W
 {
-    public class C2WCreateCharacterHandler : IPacketHandler
+    [PacketOpcode(Opcodes.C2WCreateCharacterRequest)]
+public class C2WCreateCharacterHandler : IPacketHandler
     {
         private static readonly Logger Logger =
             LogManager.GetCurrentClassLogger();

@@ -144,15 +144,27 @@ public class WorldServer : IHostedService,INetEventListener
         _server?.Stop();
         return Task.CompletedTask;
     }
+    /// <summary>
+    /// Wires every [PacketOpcode]-tagged handler in this assembly into
+    /// _packetDispatcher automatically. Adding a new packet handler no
+    /// longer requires an edit here at all — see
+    /// ArcheCore.Server.World/ADDING_PACKETS.md.
+    ///
+    /// ServiceContainer is the single source of truth for every dependency
+    /// a handler constructor can ask for. If a handler needs something new,
+    /// register it here once; AutoRegister resolves the rest by reflection.
+    /// </summary>
     private void RegisterPackets()
     {
-        _packetDispatcher.Register(Opcodes.Authenticate, new C2WAuthenticateHandler(_playerManager, _authService, _persistenceClient));
-        _packetDispatcher.Register(Opcodes.PlayerMove,   new C2WMovementHandler(_playerManager));
-        _packetDispatcher.Register(Opcodes.RequestPlayerLevel, new C2WRequestPlayerLevelHandler(_playerManager));
-        _packetDispatcher.Register(Opcodes.C2WCreateCharacterRequest, new C2WCreateCharacterHandler(_playerManager, _persistenceClient));
-        _packetDispatcher.Register(Opcodes.Interact, new C2WInteractHandler(_playerManager, _interactions));
-        _packetDispatcher.Register(Opcodes.C2WSelectCharacter, new C2WSelectCharacterHandler(_playerManager, _persistenceClient));
-        _packetDispatcher.Register(Opcodes.ChatMessage, new C2WChatHandler(_playerManager, _playerManager.Interest, _replicationManager));
+        var services = new ServiceContainer();
+        services.Register(_playerManager);
+        services.Register(_persistenceClient);
+        services.Register(_playerManager.Interest);   // the one real InterestManager
+        services.Register(_replicationManager);
+        services.Register(_authService);
+        services.Register(_interactions);
+
+        _packetDispatcher.AutoRegister(services.Resolve, typeof(WorldServer).Assembly);
     }
         
     
