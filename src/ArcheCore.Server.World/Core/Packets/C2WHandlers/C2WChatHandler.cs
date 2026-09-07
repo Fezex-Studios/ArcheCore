@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using ArcheCore.Network.Shared;
+using ArcheCore.Library.Net.Worldserver;
 using ArcheCore.Network.Shared.Packets.C2W;
 using ArcheCore.Network.Worldserver;
 using ArcheCore.Server.World.Managers;
@@ -11,7 +12,8 @@ using NLog;
 
 namespace ArcheCore.Server.World.Networking.C2W
 {
-    public class C2WChatHandler : IPacketHandler
+    [PacketOpcode(Opcodes.ChatMessage)]
+public class C2WChatHandler : IPacketHandler
     {
         private static readonly Logger Logger =
             LogManager.GetCurrentClassLogger();
