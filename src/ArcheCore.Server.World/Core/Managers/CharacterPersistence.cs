@@ -28,7 +28,7 @@ namespace ArcheCore.Server.World.Managers
         {
             try
             {
-                await _persistence.W2PCharacter.Save(
+                await _persistence.W2PCharacterSave.Send(
                     characterId, accountId, name, level, pos.X, pos.Y, pos.Z);
 
                 Logger.Info($"[Save] CharacterId={characterId} saved successfully.");

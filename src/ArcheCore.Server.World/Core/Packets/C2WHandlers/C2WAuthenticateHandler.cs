@@ -63,9 +63,27 @@ public class C2WAuthenticateHandler : IPacketHandler
 
             // No more auto-load-and-spawn. We always fetch the roster and
             // let the client decide: empty list -> create, 1+ -> select.
-            P2WCharacterListResponse list =
-                await persistence.W2PCharacter.LoadList(accountId);
-            
+            P2WCharacterListResponse list;
+
+            try
+            {
+                list = await persistence.W2PCharacterList.Send(accountId);
+            }
+            catch (Exception e)
+            {
+                // Under the old TCP client this call could only hang forever
+                // on failure — under HTTP it throws instead, so this is the
+                // difference between a player silently stuck and one who
+                // gets disconnected with a logged reason.
+                Logger.Error(e,
+                    $"[C2WAuthenticateHandler] Failed to fetch character list for AccountId={accountId} — disconnecting peer {peer.Address}");
+
+                playerManager.EnqueueAction(() =>
+                    peer.Disconnect());
+
+                return;
+            }
+
             Logger.Info(
                 $"[C2WAuthenticateHandler] AccountId={accountId} has {list.Characters?.Length ?? 0} character(s).");
 
