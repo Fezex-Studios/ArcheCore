@@ -70,8 +70,19 @@ public class C2WCreateCharacterHandler : IPacketHandler
             int     accountId,
             string  name)
         {
-            P2WCreateCharacterResponse response =
-                await _persistence.W2PCharacter.Create(accountId, name);
+            P2WCreateCharacterResponse response;
+
+            try
+            {
+                response = await _persistence.W2PCharacterCreate.Send(accountId, name);
+            }
+            catch (Exception e)
+            {
+                Logger.Error(e,
+                    $"[CreateCharacter] Persistence request failed for AccountId={accountId} — disconnecting");
+                _playerManager.EnqueueAction(() => peer.Disconnect());
+                return;
+            }
 
             if (!response.Success)
             {

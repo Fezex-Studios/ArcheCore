@@ -59,8 +59,19 @@ public class C2WSelectCharacterHandler : IPacketHandler
             int     accountId,
             long    characterId)
         {
-            P2WCharacterLoadResponse character =
-                await _persistence.W2PCharacter.Load(accountId, characterId);
+            P2WCharacterLoadResponse character;
+
+            try
+            {
+                character = await _persistence.W2PCharacterLoad.Send(accountId, characterId);
+            }
+            catch (Exception e)
+            {
+                Logger.Error(e,
+                    $"[SelectCharacter] Persistence request failed for AccountId={accountId}, CharacterId={characterId} — disconnecting");
+                _playerManager.EnqueueAction(() => peer.Disconnect());
+                return;
+            }
 
             if (!character.Found)
             {
