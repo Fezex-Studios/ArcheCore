@@ -65,7 +65,7 @@ public class C2WAuthenticateHandler : IPacketHandler
             // let the client decide: empty list -> create, 1+ -> select.
             P2WCharacterListResponse list =
                 await persistence.W2PCharacter.LoadList(accountId);
-
+            
             Logger.Info(
                 $"[C2WAuthenticateHandler] AccountId={accountId} has {list.Characters?.Length ?? 0} character(s).");
 

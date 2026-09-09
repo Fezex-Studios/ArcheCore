@@ -16,6 +16,69 @@ namespace ArcheCore.Server.World.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.0");
 
+            modelBuilder.Entity("ArcheCore.Server.World.GameData.Items.ItemCategory", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ItemCategories");
+                });
+
+            modelBuilder.Entity("ArcheCore.Server.World.GameData.Items.ItemRarity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ColorHex")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ItemRarities");
+                });
+
+            modelBuilder.Entity("ArcheCore.Server.World.GameData.Items.ItemStats", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Agility")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ArmorRating")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Intelligence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Strength")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Vitality")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ItemStats");
+                });
+
             modelBuilder.Entity("ArcheCore.Server.World.GameData.Items.ItemTable", b =>
                 {
                     b.Property<int>("Id")
@@ -105,6 +168,47 @@ namespace ArcheCore.Server.World.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("Quests");
+                });
+
+            modelBuilder.Entity("ArcheCore.Server.World.GameData.TestTable.TestTableOne", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("level")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("TestTableOnes");
+                });
+
+            modelBuilder.Entity("ArcheCore.Server.World.GameData.World.PlayerSpawn.SpawnPointTable", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<float>("X")
+                        .HasColumnType("REAL");
+
+                    b.Property<float>("Y")
+                        .HasColumnType("REAL");
+
+                    b.Property<float>("Z")
+                        .HasColumnType("REAL");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("SpawnPointTables");
                 });
 #pragma warning restore 612, 618
         }

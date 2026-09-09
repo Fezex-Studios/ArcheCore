@@ -45,6 +45,7 @@ public class WorldServer : IHostedService,INetEventListener
     // Services
     private readonly DemoService _demoService;
     private readonly AuthService _authService;
+    private readonly SpawnPointService _spawnPoints;
     
     
     private const string ConnectionKey = "MMO";
@@ -60,7 +61,8 @@ public class WorldServer : IHostedService,INetEventListener
         AuthService authService,
         GameDataPatchRunner dataPatchRunner,
         IDbContextFactory<WorldDataDbContext> dbFactory,
-        DemoManager demoManager
+        DemoManager demoManager,
+        SpawnPointService spawnPoints
         
         )
     {
@@ -74,12 +76,14 @@ public class WorldServer : IHostedService,INetEventListener
         _dataPatchRunner = dataPatchRunner;
         _dbFactory = dbFactory;
         _demoManager = demoManager;
+        _spawnPoints = spawnPoints;
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         // 0. Run DB patches first
-        await _dataPatchRunner.RunAsync();
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        await db.Database.MigrateAsync();
 
         // 1. Connect to PersistenceServer
         _persistenceClient = new PersistenceClient(_world);
@@ -94,6 +98,7 @@ public class WorldServer : IHostedService,INetEventListener
 
         // 3. Load game data
         _questManager.LoadFromDatabase();
+        await _spawnPoints.LoadAsync();
 
         // 4. Register packets
         _packetDispatcher = new PacketDispatcher();
@@ -163,6 +168,7 @@ public class WorldServer : IHostedService,INetEventListener
         services.Register(_replicationManager);
         services.Register(_authService);
         services.Register(_interactions);
+        services.Register(_spawnPoints);
 
         _packetDispatcher.AutoRegister(services.Resolve, typeof(WorldServer).Assembly);
     }

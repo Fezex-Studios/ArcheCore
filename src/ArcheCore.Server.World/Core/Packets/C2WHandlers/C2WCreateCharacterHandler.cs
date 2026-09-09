@@ -5,6 +5,7 @@ using ArcheCore.Network.Shared.Packets.C2W;
 using ArcheCore.Network.Shared.Packets.PersistenceServer.P2W;
 using ArcheCore.Network.Shared.Packets.W2C;
 using ArcheCore.Network.Worldserver;
+using ArcheCore.Server.World.Core.Services;
 using ArcheCore.Server.World.Managers;
 using LiteNetLib;
 using MessagePack;
@@ -22,13 +23,17 @@ public class C2WCreateCharacterHandler : IPacketHandler
 
         private readonly PlayerManager    _playerManager;
         private readonly PersistenceClient _persistence;
+        private readonly SpawnPointService _spawnPoints;
 
         public C2WCreateCharacterHandler(
             PlayerManager     playerManager,
-            PersistenceClient persistence)
+            PersistenceClient persistence,
+            SpawnPointService spawnPoints
+            )
         {
             _playerManager = playerManager;
             _persistence   = persistence;
+            _spawnPoints = spawnPoints;
         }
 
         public void Handle(NetPeer peer, NetPacketReader reader)
@@ -80,6 +85,9 @@ public class C2WCreateCharacterHandler : IPacketHandler
                 $"[CreateCharacter] Created '{response.Name}' " +
                 $"AccountId={accountId}");
 
+
+            var spawn = _spawnPoints.GetDefaultSpawn();
+
             // No explicit "clear pending" step needed anymore - the peer
             // stops being pending the moment SpawnPlayer assigns it a
             // NetworkId inside HandlePlayerConnected below.
@@ -90,9 +98,9 @@ public class C2WCreateCharacterHandler : IPacketHandler
                 CharacterId = response.CharacterId,
                 Name        = response.Name,
                 Level       = 1,
-                X           = 0,
-                Y           = 2,
-                Z           = 0
+                X           = spawn.X,
+                Y           = spawn.Y,
+                Z           = spawn.Z
             };
 
             _playerManager.EnqueueAction(() =>

@@ -1,5 +1,5 @@
 <Solution>
-  <Project Path="ArcheCore.Server.Testing/ArcheCore.Server.Testing.csproj" />
+  <Project Path="ArcheCore.Server.Persistence/ArcheCore.Server.Persistence.csproj" />
   <Project Path="src/ArcheCore.Network/ArcheCore.Network.csproj" />
   <Project Path="src/ArcheCore.Server.World/ArcheCore.Server.World.csproj" />
 </Solution>
