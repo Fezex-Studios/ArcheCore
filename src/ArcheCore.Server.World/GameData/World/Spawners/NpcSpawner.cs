@@ -1,38 +1,52 @@
 ﻿using System.Collections.Generic;
 using System.Numerics;
-using ArcheCore.Library.Net.Worldserver;
-using ArcheCore.Network.Shared.Packets.W2C;
 using ArcheCore.Server.World.Core.Entities;
 using ArcheCore.Server.World.GameData.Npcs;
 using ArcheCore.Server.World.Managers;
-using LiteNetLib;
 
 namespace ArcheCore.Server.World.GameData.World.Spawners;
 
-public class NpcSpawner(ReplicationManager replication, InteractionRegistry interactions)
+/// <summary>
+/// Pure in-memory store of currently-live NPCs plus the interaction
+/// registry glue. Deliberately knows nothing about networking or
+/// interest management any more - SpawnManager owns when NPCs get
+/// created/destroyed (spawner-radius gating) and NpcAiManager owns
+/// telling nearby players about it (interest-driven replication).
+/// This used to also broadcast a full-world NPC dump to every
+/// connecting peer via SendToPeer(); that's gone, since it's exactly
+/// the "spawn everything, tell everyone about it" pattern that doesn't
+/// scale past a few hundred NPCs/players. See PlayerSpawnManager and
+/// NpcAiManager for how connect-time NPC visibility works now.
+/// </summary>
+public class NpcSpawner(InteractionRegistry interactions)
 {
     private readonly Dictionary<int, NpcEntity> _live = new();
 
-    public void SpawnFromTemplate(
+    public NpcEntity SpawnFromTemplate(
         int networkId,
+        int spawnerId,
         NpcTemplate template,
         Vector3 position)
     {
         var npc = new NpcEntity
         {
             NetworkId     = networkId,
+            SpawnerId     = spawnerId,
             TemplateId    = template.Id,
             Name          = template.Name,
             Level         = template.Level,
             ModelType     = template.ModelType,
             InteractRange = template.InteractRange,
-            Position      = position
+            Position      = position,
+            SpawnOrigin   = position
         };
 
         _live[networkId] = npc;
 
         // Makes this NPC a valid C2WInteractPacket target.
         interactions.Register(networkId, npc);
+
+        return npc;
     }
 
     public void DespawnNpc(int networkId)
@@ -41,26 +55,10 @@ public class NpcSpawner(ReplicationManager replication, InteractionRegistry inte
         interactions.Unregister(networkId);
     }
 
-    public void SendToPeer(NetPeer peer)
-    {
-        foreach (var (_, npc) in _live)
-            SendNpc(peer, npc);
-    }
+    public bool TryGet(int networkId, out NpcEntity npc) =>
+        _live.TryGetValue(networkId, out npc);
 
-    private void SendNpc(NetPeer peer, NpcEntity npc)
-    {
-        replication.Send(Opcodes.SpawnNpc,
-            new W2CSpawnNpcPacket
-            {
-                NetworkId  = npc.NetworkId,
-                TemplateId = npc.TemplateId,
-                Name       = npc.Name,
-                Level      = npc.Level,
-                ModelType  = npc.ModelType,
-                X          = npc.Position.X,
-                Y          = npc.Position.Y,
-                Z          = npc.Position.Z,
-                InteractRange = npc.InteractRange
-            }, peer);
-    }
+    public IEnumerable<NpcEntity> AllLive => _live.Values;
+
+    public int LiveCount => _live.Count;
 }

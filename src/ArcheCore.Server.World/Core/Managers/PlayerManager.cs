@@ -40,7 +40,7 @@ namespace ArcheCore.Server.World.Managers
         private readonly ReplicationManager _replication;
 
         private readonly SessionManager _sessions;
-        private readonly InterestManager _interest = new();
+        private readonly InterestManager _interest;
         private readonly PlayerMovementBroadcaster _movement;
         private readonly PlayerSpawnManager _spawn;
         private readonly CharacterPersistence _persistence;
@@ -52,18 +52,29 @@ namespace ArcheCore.Server.World.Managers
         public static string Lua =>
             System.IO.Path.Combine(AppContext.BaseDirectory, "Lua", "Server");
 
+        /// <summary>
+        /// InterestManager is now created by WorldServer and injected here
+        /// (rather than PlayerManager owning it) because SpawnManager needs
+        /// the same instance - NPCs and players share one grid so a
+        /// player's ordinary movement update discovers nearby NPCs for
+        /// free. SpawnManager is constructed before PlayerManager, so the
+        /// InterestManager it depends on can't be something PlayerManager
+        /// creates internally any more.
+        /// </summary>
         public PlayerManager(
             SpawnManager spawnManager,
             ReplicationManager replication,
             WorldServerConfig worldConfig,
             PersistenceClient persistence,
-            DemoManager demoManager)
+            DemoManager demoManager,
+            InterestManager interest)
         {
             _replication = replication;
+            _interest = interest;
 
             _sessions = new SessionManager();
             _persistence = new CharacterPersistence(persistence);
-            _movement = new PlayerMovementBroadcaster(_sessions, _interest, _replication);
+            _movement = new PlayerMovementBroadcaster(_sessions, _interest, _replication, spawnManager);
             _spawn = new PlayerSpawnManager(
                 _sessions, _persistence, _replication, _interest,
                 _luaEngine, worldConfig, demoManager, spawnManager);

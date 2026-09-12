@@ -75,7 +75,11 @@ namespace ArcheCore.Server.World.Managers
             var luaPlayer = new LuaPlayer(peer, newId, accountId, _replication);
             _luaEngine.FireEvent(PlayerEvent.OnConnect, luaPlayer);
 
-            _worldSpawnManager.SendWorldToPeer(peer);
+            // No full-world NPC dump any more - SpawnPlayer already sent
+            // spawn packets for every NPC that was in `entered` (i.e.
+            // active and near this player's spawn point). A new player
+            // simply doesn't get told about NPCs nobody's near yet,
+            // because those NPCs don't exist server-side until someone is.
 
             _demoManager.OnPlayerJoin(peer);
         }
@@ -108,6 +112,7 @@ namespace ArcheCore.Server.World.Managers
             _sessions.UnregisterAccountPeerIfCurrent(session.AccountId, peer);
 
             var knownByPeers = _interest.GetKnownBy(networkId)
+                .Where(id => !SpawnManager.IsNpcId(id))
                 .Select(id => _sessions.TryGetPeer(id, out var p) ? p : null)
                 .Where(p => p != null)
                 .ToList();
@@ -154,6 +159,16 @@ namespace ArcheCore.Server.World.Managers
 
             foreach (var otherId in entered)
             {
+                // Active NPC already standing near this player's spawn
+                // point - only the new player needs telling, there's no
+                // peer on the NPC side to notify back.
+                if (SpawnManager.IsNpcId(otherId))
+                {
+                    if (_worldSpawnManager.TryGetNpc(otherId, out var npc))
+                        W2CSpawnNpcPacketSender.Send(_replication, peer, npc);
+                    continue;
+                }
+
                 if (!_sessions.TryGetPeer(otherId, out var otherPeer))
                     continue;
 

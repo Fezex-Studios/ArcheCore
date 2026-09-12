@@ -37,6 +37,8 @@ public class WorldServer : IHostedService,INetEventListener
     private SpawnManager _spawnManager;
     private ReplicationManager _replicationManager;
     private InteractionRegistry _interactions;
+    private InterestManager _interestManager;
+    private NpcAiManager _npcAiManager;
     private CancellationTokenSource _tickCts;
     private PersistenceClient _persistenceClient;
     private DemoManager _demoManager;
@@ -90,11 +92,24 @@ public class WorldServer : IHostedService,INetEventListener
         await _persistenceClient.Start();
 
         // 2. Initialize managers
+        // InterestManager is created here, not inside PlayerManager, because
+        // SpawnManager needs the exact same instance - NPCs and players
+        // share one grid (see SpawnManager.NpcIdBase) so a player's
+        // ordinary movement update discovers nearby NPCs for free instead
+        // of needing a second, parallel spatial system.
         _replicationManager = new ReplicationManager();
         _interactions = new InteractionRegistry();
-        _spawnManager = new SpawnManager(_replicationManager, _dbFactory, _interactions);  // pass registry
-        _playerManager = new PlayerManager(_spawnManager, _replicationManager, _world,_persistenceClient,_demoManager);
+        _interestManager = new InterestManager();
+        _spawnManager = new SpawnManager(_dbFactory, _interactions, _interestManager);
+        _playerManager = new PlayerManager(_spawnManager, _replicationManager, _world, _persistenceClient, _demoManager, _interestManager);
         _playerManager.InitializeScripts();
+
+        // NpcAiManager owns wander AI + spawner-radius activation on its
+        // own thread (see NpcAiManager for why: mirrors AAEmu's
+        // ActiveRegionTick being split off the main loop). Started below,
+        // after spawner definitions are loaded and the network/tick loop
+        // is up.
+        _npcAiManager = new NpcAiManager(_spawnManager, _interestManager, _replicationManager, _playerManager);
 
         // 3. Load game data
         _questManager.LoadFromDatabase();
@@ -112,15 +127,20 @@ public class WorldServer : IHostedService,INetEventListener
             "World started | {Host}:{Port} | TickRate={TickRate} | MaxPlayers={MaxPlayers}",
             _network.Host, _network.Port, _world.TickRate, _world.MaxPlayers);
 
-        // 6. Spawn world objects from DB
-        _spawnManager.SpawnInitialObjects();  // renamed from SpawnInitialCubes
+        // 6. Load NPC spawner definitions from DB. This no longer spawns
+        // anything - spawners start dormant and NpcAiManager activates
+        // them once a player is actually nearby (fix for the old
+        // "spawn every NPC in the world at boot, dump them all to every
+        // connecting client" behavior).
+        _spawnManager.LoadSpawnerDefinitions();
 
         // 7. Services
         await _demoService.RunService();
 
-        // 8. Start tick loop
+        // 8. Start tick loop + NPC AI (separate thread - see NpcAiManager)
         _tickCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _ = RunTickLoopAsync(_tickCts.Token);
+        _npcAiManager.Start();
     }
 
     private async Task RunTickLoopAsync(CancellationToken ct)
@@ -145,6 +165,7 @@ public class WorldServer : IHostedService,INetEventListener
     public Task StopAsync(CancellationToken cancellationToken)
     {
         Logger.Info("World stopping");
+        _npcAiManager?.Stop();
         _tickCts?.Cancel();
         _server?.Stop();
         return Task.CompletedTask;
@@ -164,11 +185,12 @@ public class WorldServer : IHostedService,INetEventListener
         var services = new ServiceContainer();
         services.Register(_playerManager);
         services.Register(_persistenceClient);
-        services.Register(_playerManager.Interest);   // the one real InterestManager
+        services.Register(_interestManager);   // the one real InterestManager - shared with SpawnManager
         services.Register(_replicationManager);
         services.Register(_authService);
         services.Register(_interactions);
         services.Register(_spawnPoints);
+        services.Register(_spawnManager);
 
         _packetDispatcher.AutoRegister(services.Resolve, typeof(WorldServer).Assembly);
     }

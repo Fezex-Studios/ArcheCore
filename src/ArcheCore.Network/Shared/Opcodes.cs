@@ -23,6 +23,8 @@
         W2CInteractDenied          = 19, // W2C: interaction rejected (out of range, target gone, etc.)
         W2CCharacterList           = 20,
         C2WSelectCharacter         = 21,
-        ChatMessage                = 22
+        ChatMessage                = 22,
+        NpcPosition                = 23,
+        NpcDespawn                 = 24
     }
 }

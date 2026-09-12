@@ -6,8 +6,11 @@ import {GameDatabasePath} from "../ServerConfig";
 
 
 
-// gamedata.db lives next to the auth server executable.
-// Drop your populated database here before shipping.
+// gamedata.bin lives next to the auth server executable.
+// Drop the Editor's exported + encrypted binary here before shipping.
+// (Point GameDatabasePath / your .env config at the .bin file now — this
+// route never inspected the file's internal format, so nothing else here
+// needs to change.)
 
 function getDbHash(): string | null
 {
@@ -45,7 +48,7 @@ export async function GameDataRoute(
                     .status(503)
                     .send({
                         error:
-                            "gamedata.db not found on server"
+                            "gamedata.bin not found on server"
                     });
             }
 
@@ -66,7 +69,7 @@ export async function GameDataRoute(
             {
                 return reply
                     .status(503)
-                    .send({ error: "gamedata.db not found on server" });
+                    .send({ error: "gamedata.bin not found on server" });
             }
 
             const stream =
@@ -74,7 +77,7 @@ export async function GameDataRoute(
 
             return reply
                 .header("Content-Type",        "application/octet-stream")
-                .header("Content-Disposition", "attachment; filename=\"gamedata.db\"")
+                .header("Content-Disposition", "attachment; filename=\"gamedata.bin\"")
                 .send(stream);
         });
 }

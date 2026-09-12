@@ -10,21 +10,31 @@ namespace ArcheCore.Server.World.Managers
     /// interest-list crossing (enter/leave) plus the unreliable position
     /// tick. Split out of PlayerManager, which used to interleave this
     /// with spawning, session bookkeeping, persistence, and Lua events.
+    ///
+    /// NPCs live in the same InterestManager/SpatialGrid as players (see
+    /// SpawnManager.NpcIdBase), so when a player walks toward an NPC that
+    /// was already active before they arrived, that NPC shows up in
+    /// `entered` here exactly like another player would. SpawnManager is
+    /// used only to tell the two apart (IsNpcId) and look the NpcEntity up
+    /// so the right packet type goes out.
     /// </summary>
     public class PlayerMovementBroadcaster
     {
         private readonly SessionManager _sessions;
         private readonly InterestManager _interest;
         private readonly ReplicationManager _replication;
+        private readonly SpawnManager _spawnManager;
 
         public PlayerMovementBroadcaster(
             SessionManager sessions,
             InterestManager interest,
-            ReplicationManager replication)
+            ReplicationManager replication,
+            SpawnManager spawnManager)
         {
             _sessions = sessions;
             _interest = interest;
             _replication = replication;
+            _spawnManager = spawnManager;
         }
 
         public bool TryGetPosition(int networkId, out Vector3 position)
@@ -48,6 +58,15 @@ namespace ArcheCore.Server.World.Managers
 
             foreach (var otherId in entered)
             {
+                // NPCs already active nearby - tell the mover about them,
+                // but there's no NPC peer to tell about the mover.
+                if (SpawnManager.IsNpcId(otherId))
+                {
+                    if (_spawnManager.TryGetNpc(otherId, out var npc))
+                        W2CSpawnNpcPacketSender.Send(_replication, sender, npc);
+                    continue;
+                }
+
                 if (!_sessions.TryGetPeer(otherId, out var otherPeer))
                     continue;
 
@@ -60,6 +79,12 @@ namespace ArcheCore.Server.World.Managers
 
             foreach (var otherId in left)
             {
+                if (SpawnManager.IsNpcId(otherId))
+                {
+                    W2CNpcDespawnPacketSender.Send(_replication, new[] { sender }, otherId);
+                    continue;
+                }
+
                 if (!_sessions.TryGetPeer(otherId, out var otherPeer))
                     continue;
 
@@ -68,6 +93,7 @@ namespace ArcheCore.Server.World.Managers
             }
 
             var knownByPeers = _interest.GetKnownBy(networkId)
+                .Where(id => !SpawnManager.IsNpcId(id))
                 .Select(id => _sessions.TryGetPeer(id, out var p) ? p : null)
                 .Where(p => p != null);
 
