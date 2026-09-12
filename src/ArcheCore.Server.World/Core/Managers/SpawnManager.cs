@@ -1,36 +1,90 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Numerics;
+using ArcheCore.Server.World.Core.Entities;
+using ArcheCore.Server.World.GameData.Npcs;
 using ArcheCore.Server.World.GameData.World.Spawners;
 using ArcheCore.Server.World.Utils.Database.SQLite;
-using LiteNetLib;
 using Microsoft.EntityFrameworkCore;
 using NLog;
 
 namespace ArcheCore.Server.World.Managers;
 
+/// <summary>
+/// Owns spawner *definitions* (loaded from DB) and decides, on a timer,
+/// which spawners should currently have their NPCs alive - mirrors
+/// AAEmu's ActiveRegionTick -> IsSpawnerActive -> NpcSpawner.Update()
+/// pattern: a spawner only spawns its group once a player is within
+/// its radius, and despawns the group again once nobody's been nearby
+/// for a grace period.
+///
+/// This used to spawn every NPC from every spawner unconditionally at
+/// boot (SpawnInitialObjects). That's gone - see LoadSpawnerDefinitions,
+/// which only loads the *definitions*, and ScanSpawners, which is what
+/// actually spawns/despawns groups based on player proximity.
+///
+/// ScanSpawners is safe to call from a background thread: it only reads
+/// InterestManager/SpatialGrid (thread-safe) and returns the resulting
+/// spawn/despawn work as data. It does NOT mutate NpcSpawner's live
+/// dictionary or the InteractionRegistry itself, or send any packets -
+/// callers must run ApplySpawn/ApplyDespawn on the main tick thread
+/// (see NpcAiManager), matching how every other piece of shared,
+/// non-thread-safe state in this project is already handled (the
+/// _pendingActions queue pattern in PlayerManager).
+/// </summary>
 public class SpawnManager
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
     private static readonly Random _rng   = new();
 
-    private readonly ReplicationManager _replication;
+    /// <summary>
+    /// How long a spawner group stays alive with nobody nearby before it's
+    /// torn down again. Without this, a player clipping the edge of a
+    /// spawner's radius for one tick would cause a spawn/despawn every
+    /// second - this smooths that out.
+    /// </summary>
+    private static readonly TimeSpan DespawnGrace = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// NPC network ids start well above where player ids will ever reach
+    /// (SessionManager's ids start at 1 and MaxPlayers is in the hundreds),
+    /// so NPCs and players can share one InterestManager/SpatialGrid with
+    /// no id collisions. That's what lets a player's ordinary movement
+    /// update discover nearby NPCs for free, instead of needing a second,
+    /// parallel "am I near an NPC" system.
+    /// </summary>
+    public const int NpcIdBase = 1_000_000;
+
     private readonly IDbContextFactory<WorldDataDbContext> _dbFactory;
     private readonly NpcSpawner _npcSpawner;
+    private readonly InterestManager _interest;
 
-    private int _nextId = 1;
+    private int _nextId = NpcIdBase;
 
-    public SpawnManager(
-        ReplicationManager replication,
-        IDbContextFactory<WorldDataDbContext> dbFactory,
-        InteractionRegistry interactions)
+    private readonly Dictionary<int, SpawnerRuntime> _spawners = new();
+
+    private class SpawnerRuntime
     {
-        _replication = replication;
-        _dbFactory   = dbFactory;
-        _npcSpawner  = new NpcSpawner(replication, interactions);
+        public NpcSpawnerTable Record;
+        public NpcTemplate Template;
+        public readonly List<int> LiveNpcIds = new();
+        public bool IsActive;
+        public DateTime InactiveSince;
     }
 
-    public void SpawnInitialObjects()
+    public SpawnManager(
+        IDbContextFactory<WorldDataDbContext> dbFactory,
+        InteractionRegistry interactions,
+        InterestManager interest)
+    {
+        _dbFactory  = dbFactory;
+        _npcSpawner = new NpcSpawner(interactions);
+        _interest   = interest;
+    }
+
+    /// <summary>Loads spawner rows/templates from the DB. Spawns nothing - spawners start dormant.</summary>
+    public void LoadSpawnerDefinitions()
     {
         using var db = _dbFactory.CreateDbContext();
 
@@ -45,27 +99,124 @@ public class SpawnManager
                 continue;
             }
 
-            for (int i = 0; i < spawner.Count; i++)
-            {
-                int networkId = _nextId++;
-
-                double angle  = _rng.NextDouble() * Math.PI * 2;
-                double dist   = _rng.NextDouble() * spawner.Radius;
-                float  spawnX = spawner.X + (float)(Math.Cos(angle) * dist);
-                float  spawnZ = spawner.Z + (float)(Math.Sin(angle) * dist);
-
-                _npcSpawner.SpawnFromTemplate(
-                    networkId,
-                    template,
-                    new Vector3(spawnX, spawner.Y, spawnZ));
-
-                Logger.Info($"Spawned '{template.Name}' (NetworkId={networkId}) at ({spawnX:F1}, {spawner.Y}, {spawnZ:F1})");
-            }
+            _spawners[spawner.Id] = new SpawnerRuntime { Record = spawner, Template = template };
         }
+
+        Logger.Info($"Loaded {_spawners.Count} NPC spawner definitions (dormant until a player is nearby).");
     }
 
-    public void SendWorldToPeer(NetPeer peer)
+    /// <summary>
+    /// Read-only pass over every spawner: which should activate, which
+    /// should deactivate. Call from any thread - only touches the
+    /// thread-safe InterestManager. Returns instructions; apply them on
+    /// the main thread with ApplySpawn/ApplyDespawn.
+    /// </summary>
+    public (List<PendingSpawn> toActivate, List<int> spawnerIdsToDeactivate) ScanSpawners()
     {
-        _npcSpawner.SendToPeer(peer);
+        var toActivate = new List<PendingSpawn>();
+        var toDeactivate = new List<int>();
+
+        foreach (var runtime in _spawners.Values)
+        {
+            var position = new Vector3(runtime.Record.X, runtime.Record.Y, runtime.Record.Z);
+            int radiusCells = CellsForRadius(runtime.Record.Radius);
+            bool playerNearby = HasPlayerNearby(position, radiusCells);
+
+            if (!runtime.IsActive)
+            {
+                if (playerNearby)
+                    toActivate.Add(new PendingSpawn(runtime.Record.Id));
+            }
+            else if (playerNearby)
+            {
+                runtime.InactiveSince = default;
+            }
+            else
+            {
+                if (runtime.InactiveSince == default)
+                    runtime.InactiveSince = DateTime.UtcNow;
+                else if (DateTime.UtcNow - runtime.InactiveSince > DespawnGrace)
+                    toDeactivate.Add(runtime.Record.Id);
+            }
+        }
+
+        return (toActivate, toDeactivate);
+    }
+
+    public readonly record struct PendingSpawn(int SpawnerId);
+
+    /// <summary>Main-thread only. Actually spawns a spawner's NPC group and registers each in the shared InterestManager grid.</summary>
+    public List<NpcEntity> ApplyActivate(int spawnerId)
+    {
+        var spawned = new List<NpcEntity>();
+
+        if (!_spawners.TryGetValue(spawnerId, out var runtime) || runtime.IsActive)
+            return spawned;
+
+        runtime.IsActive = true;
+        runtime.InactiveSince = default;
+
+        for (int i = 0; i < runtime.Record.Count; i++)
+        {
+            int networkId = _nextId++;
+
+            double angle = _rng.NextDouble() * Math.PI * 2;
+            double dist  = _rng.NextDouble() * runtime.Record.Radius;
+            float spawnX = runtime.Record.X + (float)(Math.Cos(angle) * dist);
+            float spawnZ = runtime.Record.Z + (float)(Math.Sin(angle) * dist);
+            var pos = new Vector3(spawnX, runtime.Record.Y, spawnZ);
+
+            var npc = _npcSpawner.SpawnFromTemplate(networkId, runtime.Record.Id, runtime.Template, pos);
+            runtime.LiveNpcIds.Add(networkId);
+            spawned.Add(npc);
+        }
+
+        Logger.Info($"Spawner {runtime.Record.Id} activated: spawned {spawned.Count}x '{runtime.Template.Name}'.");
+        return spawned;
+    }
+
+    /// <summary>Main-thread only. Despawns a spawner's whole NPC group. Returns the ids that were removed.</summary>
+    public List<int> ApplyDeactivate(int spawnerId)
+    {
+        if (!_spawners.TryGetValue(spawnerId, out var runtime) || !runtime.IsActive)
+            return new List<int>();
+
+        runtime.IsActive = false;
+        var removed = new List<int>(runtime.LiveNpcIds);
+
+        foreach (var id in removed)
+            _npcSpawner.DespawnNpc(id);
+
+        runtime.LiveNpcIds.Clear();
+
+        Logger.Info($"Spawner {runtime.Record.Id} deactivated: despawned {removed.Count} NPCs (no players nearby for {DespawnGrace.TotalSeconds:F0}s).");
+        return removed;
+    }
+
+    /// <summary>Main-thread only. Removes a single NPC (e.g. it died) without tearing down the whole spawner group.</summary>
+    public void ApplyDespawnSingle(NpcEntity npc)
+    {
+        if (_spawners.TryGetValue(npc.SpawnerId, out var runtime))
+            runtime.LiveNpcIds.Remove(npc.NetworkId);
+
+        _npcSpawner.DespawnNpc(npc.NetworkId);
+    }
+
+    public bool TryGetNpc(int networkId, out NpcEntity npc) => _npcSpawner.TryGet(networkId, out npc);
+
+    public IEnumerable<NpcEntity> AllLiveNpcs => _npcSpawner.AllLive;
+
+    public static bool IsNpcId(int networkId) => networkId >= NpcIdBase;
+
+    private bool HasPlayerNearby(Vector3 position, int radiusCells)
+    {
+        return _interest.GetNearbyAtPosition(position, radiusCells)
+            .Any(id => !IsNpcId(id));
+    }
+
+    private int CellsForRadius(float radius)
+    {
+        float cellSize = _interest.CellSize;
+        return Math.Max(1, (int)Math.Ceiling(radius / cellSize));
     }
 }
