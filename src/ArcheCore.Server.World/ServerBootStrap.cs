@@ -62,6 +62,7 @@ public static class ServerBootstrap
         builder.Services.AddSingleton<AuthService>();
         builder.Services.AddSingleton<SpawnPointService>();
         builder.Services.AddSingleton<QuestManager>();
+        builder.Services.AddSingleton<ItemManager>();
         builder.Services.AddSingleton<DemoManager>();
 
         return builder;

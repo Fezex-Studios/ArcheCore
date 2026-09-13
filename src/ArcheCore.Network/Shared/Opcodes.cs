@@ -25,6 +25,9 @@
         C2WSelectCharacter         = 21,
         ChatMessage                = 22,
         NpcPosition                = 23,
-        NpcDespawn                 = 24
+        NpcDespawn                 = 24,
+        ItemRequestData            = 25,
+        ItemDataResponse           = 26
+        
     }
 }

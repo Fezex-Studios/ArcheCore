@@ -2,6 +2,7 @@
 using ArcheCore.Server.World.Utils.Database.SQLite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -9,9 +10,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ArcheCore.Server.World.Migrations
 {
     [DbContext(typeof(WorldDataDbContext))]
-    partial class WorldDataDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260912233459_ItemTableUpdate")]
+    partial class ItemTableUpdate
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.0");
@@ -92,6 +95,9 @@ namespace ArcheCore.Server.World.Migrations
                     b.Property<string>("icon_name")
                         .IsRequired()
                         .HasColumnType("TEXT");
+
+                    b.Property<int>("max_stack")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("name")
                         .IsRequired()

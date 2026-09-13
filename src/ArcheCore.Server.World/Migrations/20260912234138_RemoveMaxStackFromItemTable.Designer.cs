@@ -2,6 +2,7 @@
 using ArcheCore.Server.World.Utils.Database.SQLite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -9,9 +10,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ArcheCore.Server.World.Migrations
 {
     [DbContext(typeof(WorldDataDbContext))]
-    partial class WorldDataDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260912234138_RemoveMaxStackFromItemTable")]
+    partial class RemoveMaxStackFromItemTable
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.0");
