@@ -13,26 +13,6 @@ using Worldserver.ArcheCore.PersistenceServer.Scripts;
 
 namespace ArcheCore.Server.World.Managers
 {
-    /// <summary>
-    /// What PlayerManager used to be a 448-line god object doing session
-    /// tracking, spawning, movement broadcast, character saving, Lua event
-    /// firing, and interaction-player creation, all in one class.
-    ///
-    /// It's now a thin coordinator: it owns instances of the four classes
-    /// each responsibility was split into (SessionManager,
-    /// PlayerSpawnManager, PlayerMovementBroadcaster, CharacterPersistence)
-    /// and delegates to whichever one actually owns the data. Every public
-    /// method that existed before still exists here with the same
-    /// signature, so no handler or call site anywhere else needed to
-    /// change - this is the "thin facade during the transition" the split
-    /// was designed around.
-    ///
-    /// What's left directly on PlayerManager itself: the pending-action
-    /// queue, the Lua engine, and the two bits of interaction glue
-    /// (CreateLuaPlayer / FireInteractEvent) that don't cleanly belong to
-    /// any one of the four extracted pieces since they touch session data,
-    /// replication, and Lua all at once.
-    /// </summary>
     public class PlayerManager
     {
         private readonly ConcurrentQueue<Action> _pendingActions = new();
@@ -52,15 +32,6 @@ namespace ArcheCore.Server.World.Managers
         public static string Lua =>
             System.IO.Path.Combine(AppContext.BaseDirectory, "Lua", "Server");
 
-        /// <summary>
-        /// InterestManager is now created by WorldServer and injected here
-        /// (rather than PlayerManager owning it) because SpawnManager needs
-        /// the same instance - NPCs and players share one grid so a
-        /// player's ordinary movement update discovers nearby NPCs for
-        /// free. SpawnManager is constructed before PlayerManager, so the
-        /// InterestManager it depends on can't be something PlayerManager
-        /// creates internally any more.
-        /// </summary>
         public PlayerManager(
             SpawnManager spawnManager,
             ReplicationManager replication,
@@ -126,6 +97,9 @@ namespace ArcheCore.Server.World.Managers
 
         public long GetCharacterId(NetPeer peer) => _sessions.GetCharacterId(peer);
 
+        // NEW — needed so CharacterData responses can include the name.
+        public string GetName(NetPeer peer) => _sessions.GetName(peer);
+
         // --- Spawn/connect lifecycle (delegated to PlayerSpawnManager) ---
 
         public void HandlePlayerConnected(
@@ -145,9 +119,6 @@ namespace ArcheCore.Server.World.Managers
             _movement.BroadcastPosition(sender, networkId, position);
 
         // --- Interaction system ---
-        // Kept here rather than in one of the four extracted classes:
-        // this touches session data, the replication manager, and Lua all
-        // at once, so no single split-out class owns everything it needs.
 
         public LuaPlayer CreateLuaPlayer(NetPeer peer)
         {
@@ -164,6 +135,15 @@ namespace ArcheCore.Server.World.Managers
                 player,
                 target.TemplateId,
                 (int)target.Kind);
+        }
+
+        public int LevelUp(NetPeer peer)
+        {
+            if (!TryGetSession(peer, out var session)) return -1;
+            session.Level += 1;
+
+            _persistence.SaveCharacterAsync(session.CharacterId, session.AccountId, session.Name, session.Level, session.Position);
+            return session.Level;
         }
     }
 }

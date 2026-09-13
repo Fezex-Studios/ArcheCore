@@ -5,16 +5,13 @@ using LiteNetLib;
 
 namespace ArcheCore.Server.World.Networking.W2C;
 
-public static class W2CPlayerLevelResponsePacketSender
+public static class W2CCharacterDataPacketSender
 {
-    public static void Send(NetPeer peer, int level)
+    public static void Send(NetPeer peer, CharacterData data)
     {
         WorldserverPacketSender.SendPacket(
             peer,
-            Opcodes.PlayerLevelResponse,
-            new W2CPlayerLevelResponsePacket {Level = level}
-            );
+            Opcodes.PlayerSpawned,   // matches client's W2CCharacterDataHandler registration
+            data);
     }
 }
-
-// WILL NEED TO REFACTOR THIS LATER ON

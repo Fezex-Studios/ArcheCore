@@ -8,17 +8,15 @@ using ArcheCore.Server.World.Networking.W2C;
 using LiteNetLib;
 using MessagePack;
 using NLog;
-using Worldserver.ArcheCore.PersistenceServer.Scripts;
 
 namespace ArcheCore.Server.World.Networking.C2W;
 
 [PacketOpcode(Opcodes.RequestPlayerLevel)]
-public class C2WRequestPlayerLevelHandler: IPacketHandler
+public class C2WRequestPlayerLevelHandler : IPacketHandler
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
     private readonly PlayerManager playerManager;
-    
-    
+
     public C2WRequestPlayerLevelHandler(PlayerManager playerManager)
     {
         this.playerManager = playerManager;
@@ -31,11 +29,10 @@ public class C2WRequestPlayerLevelHandler: IPacketHandler
 
         int level = playerManager.GetLevel(peer);
         if (level == -1) return;
-
+        
         // No need to go to persistence — level is already in memory
         playerManager.EnqueueAction(() =>
             W2CPlayerLevelResponsePacketSender.Send(peer, level));
     }
-    
-    
 }
+// NEED TO FIX THIS HANDLER IT WILL BE A TEMPLATE FOR AN ADMIN COMMAND TO REUQEST PLAYER LEVEL or Data for instance 

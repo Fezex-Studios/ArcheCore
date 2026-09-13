@@ -129,5 +129,8 @@ namespace ArcheCore.Server.World.Managers
 
         public long GetCharacterId(NetPeer peer) =>
             peer.Tag is PlayerSession session ? session.CharacterId : -1;
+
+        public string? GetName(NetPeer peer) =>
+            peer.Tag is PlayerSession session ? session.Name : null;
     }
 }
