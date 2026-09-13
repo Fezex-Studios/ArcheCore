@@ -27,7 +27,9 @@
         NpcPosition                = 23,
         NpcDespawn                 = 24,
         ItemRequestData            = 25,
-        ItemDataResponse           = 26
+        ItemDataResponse           = 26,
+        LevelUp = 28,   // NEW
+        PlayerSpawned = 29,
         
     }
 }
