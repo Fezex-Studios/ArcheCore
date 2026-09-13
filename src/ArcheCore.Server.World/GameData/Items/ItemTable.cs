@@ -1,8 +1,13 @@
-﻿namespace ArcheCore.Server.World.GameData.Items;
+﻿
+using System.ComponentModel.DataAnnotations;
+
+namespace ArcheCore.Server.World.GameData.Items;
 
 public class ItemTable
 {
-    public int Id { get; set; }
-    public string Name { get; set; }
-    public int MaxStack  { get; set; }
+    [Key]
+    public int item_id { get; set; }
+    public string name { get; set; }
+    public string description { get; set; }
+    public string icon_name { get; set; }
 }

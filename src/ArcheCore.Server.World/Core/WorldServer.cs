@@ -32,6 +32,7 @@ public class WorldServer : IHostedService,INetEventListener
     
     // Managers
     private readonly QuestManager _questManager;
+    private readonly ItemManager _itemManager;
     private NetManager _server;
     private PlayerManager _playerManager;
     private SpawnManager _spawnManager;
@@ -59,6 +60,7 @@ public class WorldServer : IHostedService,INetEventListener
         IServiceScopeFactory scopeFactory,
         IOptions<NetworkConfig> network,
         QuestManager questManager,
+        ItemManager itemManager,
         DemoService demoService,
         AuthService authService,
         GameDataPatchRunner dataPatchRunner,
@@ -72,6 +74,7 @@ public class WorldServer : IHostedService,INetEventListener
         _world = world.Value;
         _network = network.Value;
         _questManager = questManager;
+        _itemManager = itemManager;
         _scopeFactory = scopeFactory;
         _demoService = demoService;
         _authService = authService;
@@ -113,6 +116,7 @@ public class WorldServer : IHostedService,INetEventListener
 
         // 3. Load game data
         _questManager.LoadFromDatabase();
+        _itemManager.LoadFromDatabase();
         await _spawnPoints.LoadAsync();
 
         // 4. Register packets
@@ -191,6 +195,7 @@ public class WorldServer : IHostedService,INetEventListener
         services.Register(_interactions);
         services.Register(_spawnPoints);
         services.Register(_spawnManager);
+        services.Register(_itemManager);
 
         _packetDispatcher.AutoRegister(services.Resolve, typeof(WorldServer).Assembly);
     }
