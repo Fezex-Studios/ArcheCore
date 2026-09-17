@@ -24,14 +24,16 @@ namespace ArcheCore.Server.World.Managers;
 /// which only loads the *definitions*, and ScanSpawners, which is what
 /// actually spawns/despawns groups based on player proximity.
 ///
-/// ScanSpawners is safe to call from a background thread: it only reads
-/// InterestManager/SpatialGrid (thread-safe) and returns the resulting
-/// spawn/despawn work as data. It does NOT mutate NpcSpawner's live
-/// dictionary or the InteractionRegistry itself, or send any packets -
-/// callers must run ApplySpawn/ApplyDespawn on the main tick thread
-/// (see NpcAiManager), matching how every other piece of shared,
-/// non-thread-safe state in this project is already handled (the
-/// _pendingActions queue pattern in PlayerManager).
+/// ScanSpawners is MAIN-THREAD ONLY. InterestManager/SpatialGrid dropped
+/// their internal locking (see those classes) on the assumption that
+/// exactly one thread ever touches them - that's now the main tick
+/// thread, via NpcAiManager.Tick(). It reads InterestManager/SpatialGrid
+/// and returns the resulting spawn/despawn work as data; it does NOT
+/// mutate NpcSpawner's live dictionary or InteractionRegistry itself, or
+/// send any packets - callers still run ApplySpawn/ApplyDespawn through
+/// the existing _pendingActions queue pattern in PlayerManager, which is
+/// now a same-thread deferral (applied next tick) rather than a
+/// cross-thread handoff.
 /// </summary>
 public class SpawnManager
 {
@@ -63,6 +65,11 @@ public class SpawnManager
     private int _nextId = NpcIdBase;
 
     private readonly Dictionary<int, SpawnerRuntime> _spawners = new();
+
+    // Reused across ScanSpawners' per-spawner proximity checks - safe as a
+    // single field because ScanSpawners runs synchronously on one thread
+    // (see class remarks) and nothing holds onto this list across calls.
+    private readonly List<int> _nearbyScratch = new(capacity: 64);
 
     private class SpawnerRuntime
     {
@@ -210,8 +217,15 @@ public class SpawnManager
 
     private bool HasPlayerNearby(Vector3 position, int radiusCells)
     {
-        return _interest.GetNearbyAtPosition(position, radiusCells)
-            .Any(id => !IsNpcId(id));
+        _interest.GetNearbyAtPosition(position, radiusCells, _nearbyScratch);
+
+        for (int i = 0; i < _nearbyScratch.Count; i++)
+        {
+            if (!IsNpcId(_nearbyScratch[i]))
+                return true;
+        }
+
+        return false;
     }
 
     private int CellsForRadius(float radius)

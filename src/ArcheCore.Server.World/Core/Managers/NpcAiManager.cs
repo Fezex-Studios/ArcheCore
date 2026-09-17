@@ -2,7 +2,6 @@
 using System.Collections.Concurrent;
 using System.Linq;
 using System.Numerics;
-using System.Threading;
 using ArcheCore.Server.World.Core.Entities;
 using ArcheCore.Server.World.Networking.W2C;
 using LiteNetLib;
@@ -11,27 +10,33 @@ using NLog;
 namespace ArcheCore.Server.World.Managers
 {
     /// <summary>
-    /// Runs NPC wander AI and spawner-radius activation on its own thread,
-    /// the same way AAEmu splits ActiveRegionTick (useAsync, its own task)
-    /// from the fast per-connection network loop. WorldServer's tick loop
-    /// stays cheap - just PollEvents + DrainActions - instead of also
-    /// carrying NPC simulation cost on every tick.
+    /// Runs NPC wander AI and spawner-radius activation. Used to run on its
+    /// own background thread (mirroring AAEmu's ActiveRegionTick split off
+    /// the main loop); that model is retired now that SpatialGrid and
+    /// InterestManager have dropped their internal locking in favor of
+    /// single-thread ownership (see those classes' remarks) - a background
+    /// AI thread reading the grid concurrently with the main thread's
+    /// player-movement writes would corrupt it. Instead, WorldServer's tick
+    /// loop calls Tick() once per tick, and the interval gating below
+    /// (AiInterval / SpawnerScanInterval) keeps the actual AI/scan work
+    /// from running every tick - same cadence as before, just on the main
+    /// thread instead of a second one.
     ///
-    /// Threading contract, since this is the one place in the project doing
-    /// real cross-thread work:
-    ///   - InterestManager/SpatialGrid are internally locked, so this
-    ///     thread can safely read/write them directly.
-    ///   - Everything else that's NOT thread-safe (NpcSpawner's live
-    ///     dictionary, InteractionRegistry, ReplicationManager sends,
-    ///     SessionManager) is only ever touched by enqueuing an Action
-    ///     onto PlayerManager's existing _pendingActions queue, which the
-    ///     main tick thread drains once per tick. That's the same pattern
-    ///     already used elsewhere in this project for cross-thread work -
-    ///     this isn't a new convention, just a second user of it.
-    ///   - Per-NPC wander state (NpcAiState) is owned exclusively by this
-    ///     thread after it's added; the main thread only ever adds/removes
-    ///     entries (on spawn/despawn), never mutates one in place, so a
-    ///     ConcurrentDictionary is enough - no per-entity locking needed.
+    /// Threading contract, updated for the single-thread model:
+    ///   - InterestManager/SpatialGrid are NOT thread-safe and are only
+    ///     ever touched from Tick(), which only WorldServer's tick loop
+    ///     calls. Do not call Tick() from anywhere else.
+    ///   - The _pendingActions queue (PlayerManager.EnqueueAction) is no
+    ///     longer bridging two threads here - it's kept as-is so
+    ///     ApplyActivate/ApplyDeactivate/ApplyMove still run through the
+    ///     same drain-once-per-tick path as everything else, deferred to
+    ///     the start of next tick rather than applied inline. That one
+    ///     tick of latency is harmless and keeps this diff small; it can
+    ///     be inlined later if it's ever worth removing.
+    ///   - Per-NPC wander state (NpcAiState) is touched only from Tick(),
+    ///     so the ConcurrentDictionary is no longer required for
+    ///     correctness, just left in place since a plain Dictionary buys
+    ///     nothing here and this isn't the hot path that needs it.
     /// </summary>
     public class NpcAiManager
     {
@@ -45,8 +50,8 @@ namespace ArcheCore.Server.World.Managers
 
         private readonly ConcurrentDictionary<int, NpcAiState> _active = new();
 
-        private Thread _thread;
-        private volatile bool _running;
+        private DateTime _lastSpawnerScan = DateTime.MinValue;
+        private DateTime _lastAiTick = DateTime.MinValue;
 
         private static readonly TimeSpan AiInterval = TimeSpan.FromMilliseconds(300);
         private static readonly TimeSpan SpawnerScanInterval = TimeSpan.FromSeconds(1);
@@ -77,49 +82,47 @@ namespace ArcheCore.Server.World.Managers
 
         public void Start()
         {
-            _running = true;
-            _thread = new Thread(RunLoop) { Name = "NpcAiManager", IsBackground = true };
-            _thread.Start();
-            Logger.Info("NpcAiManager started (AI tick every {0}ms, spawner scan every {1}s).",
+            _lastSpawnerScan = DateTime.MinValue;
+            _lastAiTick = DateTime.MinValue;
+            Logger.Info("NpcAiManager ready (AI tick every {0}ms, spawner scan every {1}s, driven by the main tick loop).",
                 AiInterval.TotalMilliseconds, SpawnerScanInterval.TotalSeconds);
         }
 
         public void Stop()
         {
-            _running = false;
-            _thread?.Join(TimeSpan.FromSeconds(2));
+            // Nothing to tear down - there's no background thread anymore.
+            // Kept so WorldServer.StopAsync doesn't need to change.
         }
 
-        private void RunLoop()
+        /// <summary>
+        /// Called once per tick from WorldServer's tick loop, on the same
+        /// thread as everything else that touches InterestManager/
+        /// SpatialGrid. Internally rate-limited by AiInterval/
+        /// SpawnerScanInterval so this stays cheap on ticks where neither
+        /// is due yet.
+        /// </summary>
+        public void Tick()
         {
-            var lastSpawnerScan = DateTime.MinValue;
-            var lastAiTick = DateTime.MinValue;
-
-            while (_running)
+            try
             {
-                try
-                {
-                    var now = DateTime.UtcNow;
+                var now = DateTime.UtcNow;
 
-                    if (now - lastSpawnerScan >= SpawnerScanInterval)
-                    {
-                        lastSpawnerScan = now;
-                        RunSpawnerScan();
-                    }
-
-                    if (now - lastAiTick >= AiInterval)
-                    {
-                        var delta = lastAiTick == DateTime.MinValue ? AiInterval : now - lastAiTick;
-                        lastAiTick = now;
-                        RunAiStep(delta);
-                    }
-                }
-                catch (Exception ex)
+                if (now - _lastSpawnerScan >= SpawnerScanInterval)
                 {
-                    Logger.Error(ex, "[NpcAiManager] Unhandled exception - continuing.");
+                    _lastSpawnerScan = now;
+                    RunSpawnerScan();
                 }
 
-                Thread.Sleep(50);
+                if (now - _lastAiTick >= AiInterval)
+                {
+                    var delta = _lastAiTick == DateTime.MinValue ? AiInterval : now - _lastAiTick;
+                    _lastAiTick = now;
+                    RunAiStep(delta);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "[NpcAiManager] Unhandled exception in Tick - continuing.");
             }
         }
 

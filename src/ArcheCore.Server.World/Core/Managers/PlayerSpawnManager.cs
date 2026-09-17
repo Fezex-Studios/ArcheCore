@@ -4,6 +4,7 @@ using ArcheCore.Network.Shared.Packets.PersistenceServer.P2W;
 using ArcheCore.Server.World.Lua.Scripting;
 using ArcheCore.Server.World.Lua.Scripting.Bindings;
 using ArcheCore.Server.World.Networking.W2C;
+using ArcheCore.Server.World.Replication;
 using ArcheCore.Server.World.Utils.Config;
 using LiteNetLib;
 using NLog;
@@ -19,6 +20,13 @@ namespace ArcheCore.Server.World.Managers
     /// pending, authenticated peer into a spawned character in the world,
     /// and cleanly tearing that down again on disconnect (including the
     /// save-on-disconnect call and interest-list cleanup).
+    ///
+    /// CHANGED: now also owns the matching SnapshotDispatcher lifecycle -
+    /// SetTransform on spawn (so a freshly-spawned player has an entry
+    /// before their first move, instead of being invisible to nearby
+    /// observers' snapshots until they take a step) and Remove on
+    /// disconnect (so a departed player's stale transform doesn't linger
+    /// and get replicated to observers as a ghost).
     /// </summary>
     public class PlayerSpawnManager
     {
@@ -32,6 +40,8 @@ namespace ArcheCore.Server.World.Managers
         private readonly WorldServerConfig _worldConfig;
         private readonly DemoManager _demoManager;
         private readonly SpawnManager _worldSpawnManager;
+        private readonly SnapshotDispatcher _snapshots;
+        private readonly TickClock _clock;
 
         public PlayerSpawnManager(
             SessionManager sessions,
@@ -41,7 +51,9 @@ namespace ArcheCore.Server.World.Managers
             LuaEngine luaEngine,
             WorldServerConfig worldConfig,
             DemoManager demoManager,
-            SpawnManager worldSpawnManager)
+            SpawnManager worldSpawnManager,
+            SnapshotDispatcher snapshots,
+            TickClock clock)
         {
             _sessions = sessions;
             _persistence = persistence;
@@ -51,6 +63,8 @@ namespace ArcheCore.Server.World.Managers
             _worldConfig = worldConfig;
             _demoManager = demoManager;
             _worldSpawnManager = worldSpawnManager;
+            _snapshots = snapshots;
+            _clock = clock;
         }
 
         public void HandlePlayerConnected(
@@ -118,6 +132,7 @@ namespace ArcheCore.Server.World.Managers
                 .ToList();
 
             _interest.Remove(networkId);
+            _snapshots.Remove(networkId);
 
             _sessions.UnregisterNetworkId(networkId);
             peer.Tag = null;
@@ -152,6 +167,7 @@ namespace ArcheCore.Server.World.Managers
             peer.Tag = session;
 
             _sessions.RegisterNetworkId(networkId, peer);
+            _snapshots.SetTransform(networkId, spawn, yaw: 0f, isNpc: false, _clock.Current);
 
             W2CSpawnPlayerPacketSender.Send(_replication, peer, networkId, spawn, true);
 
