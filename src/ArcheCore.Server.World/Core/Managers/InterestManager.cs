@@ -79,6 +79,29 @@ namespace ArcheCore.Server.World.Managers
 
             _grid.GetNearby(networkId, _nearbyScratch);
 
+            // Hard ceiling on how many nearby entities get processed for
+            // enter/leave bookkeeping. Without this, a dense cluster (or,
+            // worse, thousands of bots random-walking near a shared spawn
+            // point instead of spreading across a real map) makes a
+            // single cell crossing trigger symmetric ObserverSet updates
+            // against however many hundreds or thousands of entities are
+            // nearby - unbounded, and the direct cause of tick time
+            // climbing from ~0ms to 140ms+ as bot count grew to 5000 even
+            // after SnapshotDispatcher's own scan cap was in place (see
+            // TickHealth logs, 2026-09-17 01:xx run - gen2GC stayed near
+            // 0 throughout, ruling out GC; the shape was still O(local
+            // density) per crossing).
+            //
+            // No position data is available at this layer - SpatialGrid
+            // tracks cell membership only, not coordinates - so this caps
+            // by raw count rather than true nearest-N. Under realistic,
+            // non-pathological clustering that distinction rarely
+            // matters; the goal is a hard ceiling on worst-case cost, not
+            // perfect selection under an extreme crush.
+            const int MaxNearbyCandidates = 300;
+            if (_nearbyScratch.Count > MaxNearbyCandidates)
+                _nearbyScratch.RemoveRange(MaxNearbyCandidates, _nearbyScratch.Count - MaxNearbyCandidates);
+
             _nearbySet.Clear();
             for (int i = 0; i < _nearbyScratch.Count; i++)
                 _nearbySet.Add(_nearbyScratch[i]);

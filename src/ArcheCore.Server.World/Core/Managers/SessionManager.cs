@@ -5,20 +5,13 @@ namespace ArcheCore.Server.World.Managers
 {
     /// <summary>
     /// Everything to do with "which peer is which player" lives here. This
-    /// is the only class that touches peer.Tag directly - every other
-    /// class (handlers, other managers, PlayerManager itself) goes through
-    /// one of these methods instead of casting Tag itself.
-    ///
-    /// Split out of PlayerManager, which used to own this alongside five
-    /// other unrelated responsibilities (spawning, movement broadcast,
-    /// character persistence, Lua events, interaction-player creation).
+    /// is the only class that should touch peer.Tag directly.
     /// </summary>
     public class SessionManager
     {
         private int _nextNetworkId = 1;
 
-        // Reverse indexes only - these can't live on PlayerSession because
-        // they map FROM an id TO a peer, not the other way around.
+        // Reverse indexes only - these map FROM an id TO a peer.
         private readonly Dictionary<int, NetPeer> _idToPeer = new();
         private readonly Dictionary<int, NetPeer> _accountToPeer = new();
 
@@ -80,6 +73,7 @@ namespace ArcheCore.Server.World.Managers
             return false;
         }
 
+        /// <summary>Every spawned (in-world) player's peer.</summary>
         public IEnumerable<NetPeer> GetAllConnectedPeers() => _idToPeer.Values;
 
         public bool TryGetAccountPeer(int accountId, out NetPeer peer) =>
@@ -102,10 +96,7 @@ namespace ArcheCore.Server.World.Managers
 
         /// <summary>
         /// Call once a token has been validated. Creates a session for this
-        /// peer with no NetworkId yet - that's what "pending" means. Covers
-        /// both the "no characters yet, show create" and "pick a character"
-        /// states, since both just need to know which account owns the peer
-        /// before anything spawns.
+        /// peer with no NetworkId yet - that's what "pending" means.
         /// </summary>
         public void TrackPendingSelection(NetPeer peer, int accountId)
         {
@@ -114,14 +105,30 @@ namespace ArcheCore.Server.World.Managers
 
         /// <summary>
         /// Non-null only for a peer that authenticated but hasn't spawned
-        /// yet (session exists, NetworkId is still null). A peer that's
-        /// already in-world, or never authenticated at all, returns null.
+        /// yet. A peer that's already in-world, or never authenticated,
+        /// returns null.
         /// </summary>
         public int? GetPendingAccountId(NetPeer peer)
         {
             return peer.Tag is PlayerSession { NetworkId: null } session
                 ? session.AccountId
                 : null;
+        }
+
+        /// <summary>
+        /// Claims the one allowed select/create for a pending peer. Returns
+        /// false if the peer isn't pending or a request was already accepted
+        /// (double-clicked "Enter World", resent packet, etc).
+        /// </summary>
+        public bool TryBeginSpawn(NetPeer peer)
+        {
+            if (peer.Tag is PlayerSession { NetworkId: null, SpawnRequested: false } session)
+            {
+                session.SpawnRequested = true;
+                return true;
+            }
+
+            return false;
         }
 
         public int GetLevel(NetPeer peer) =>

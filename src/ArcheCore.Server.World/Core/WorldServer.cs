@@ -8,6 +8,7 @@ using ArcheCore.Server.World.Managers;
 using ArcheCore.Server.World.Networking.C2W;
 using ArcheCore.Server.World.Utils.Database.SQLite;
 using LiteNetLib;
+using MessagePack;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -40,6 +41,7 @@ public class WorldServer : IHostedService, INetEventListener
     private InterestManager _interestManager;
     private NpcAiManager _npcAiManager;
     private CancellationTokenSource _tickCts;
+    private Task _tickLoop;
     private PersistenceClient _persistenceClient;
     private DemoManager _demoManager;
 
@@ -49,6 +51,9 @@ public class WorldServer : IHostedService, INetEventListener
     private readonly SpawnPointService _spawnPoints;
 
     private const string ConnectionKey = "MMO";
+
+    // How long shutdown waits for the final character saves.
+    private static readonly TimeSpan ShutdownSaveTimeout = TimeSpan.FromSeconds(10);
 
     public WorldServer(
         IOptions<WorldServerConfig> world,
@@ -89,9 +94,7 @@ public class WorldServer : IHostedService, INetEventListener
         // 2. Initialize managers
         // InterestManager is created here, not inside PlayerManager, because
         // SpawnManager needs the exact same instance - NPCs and players
-        // share one grid (see SpawnManager.NpcIdBase) so a player's
-        // ordinary movement update discovers nearby NPCs for free instead
-        // of needing a second, parallel spatial system.
+        // share one grid (see SpawnManager.NpcIdBase).
         _replicationManager = new ReplicationManager();
         _interactions = new InteractionRegistry();
         _interestManager = new InterestManager();
@@ -99,10 +102,9 @@ public class WorldServer : IHostedService, INetEventListener
         _playerManager = new PlayerManager(_spawnManager, _replicationManager, _world, _persistenceClient, _demoManager, _interestManager);
         _playerManager.InitializeScripts();
 
-        // NpcAiManager owns wander AI + spawner-radius activation. It has no
-        // thread of its own - RunTickLoopAsync calls Tick() once per tick,
-        // on the same thread as everything else that touches
-        // InterestManager/SpatialGrid (neither of which is thread-safe).
+        // NpcAiManager has no thread of its own - RunTickLoopAsync calls
+        // Tick() once per tick, on the same thread as everything else that
+        // touches InterestManager/SpatialGrid (neither is thread-safe).
         _npcAiManager = new NpcAiManager(_spawnManager, _interestManager, _replicationManager, _playerManager);
 
         // 3. Load game data
@@ -122,9 +124,7 @@ public class WorldServer : IHostedService, INetEventListener
             "World started | {Host}:{Port} | TickRate={TickRate} | MaxPlayers={MaxPlayers}",
             _network.Host, _network.Port, _world.TickRate, _world.MaxPlayers);
 
-        // 6. Load NPC spawner definitions from DB. Spawns nothing - spawners
-        // start dormant and NpcAiManager.Tick() activates them once a player
-        // is actually nearby.
+        // 6. Load NPC spawner definitions (all dormant until a player is near).
         _spawnManager.LoadSpawnerDefinitions();
 
         // 7. Services
@@ -133,7 +133,7 @@ public class WorldServer : IHostedService, INetEventListener
         // 8. Reset NPC AI timers, then start the tick loop (which drives NPC AI).
         _npcAiManager.Start();
         _tickCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        _ = RunTickLoopAsync(_tickCts.Token);
+        _tickLoop = RunTickLoopAsync(_tickCts.Token);
     }
 
     private async Task RunTickLoopAsync(CancellationToken ct)
@@ -142,61 +142,88 @@ public class WorldServer : IHostedService, INetEventListener
         using var timer = new PeriodicTimer(interval);
         uint tick = 0;
 
-        // Server's own opinion of its health, logged every ~5s regardless
-        // of what any client-side tool reports.
         var health = new TickHealthMonitor(_world.TickRate, msg => Logger.Info(msg));
         var stopwatch = new System.Diagnostics.Stopwatch();
 
-        while (!ct.IsCancellationRequested && await timer.WaitForNextTickAsync(ct))
+        try
         {
-            stopwatch.Restart();
-            try
+            while (!ct.IsCancellationRequested && await timer.WaitForNextTickAsync(ct))
             {
-                tick++;
+                stopwatch.Restart();
+                try
+                {
+                    tick++;
 
-                // Must happen before PollEvents: movement packets are
-                // processed synchronously inside PollEvents, and
-                // PlayerMovementBroadcaster timestamps SetTransform with
-                // whatever TickClock currently holds.
-                _playerManager.AdvanceTick(tick);
+                    // Before PollEvents: movement handlers timestamp with TickClock.
+                    _playerManager.AdvanceTick(tick);
 
-                _playerManager.DrainActions();
-                _server?.PollEvents();
+                    _playerManager.DrainActions();
 
-                // NPC wander AI + spawner activation. Internally rate-limited
-                // (AI every 300ms, spawner scan every 1s), so this is cheap on
-                // ticks where neither is due. The spawn/despawn/move work it
-                // queues via EnqueueAction runs at the next DrainActions.
-                _npcAiManager.Tick();
+                    // Every C2W handler runs inside here. OnNetworkReceive
+                    // catches per-packet exceptions, so one bad packet can no
+                    // longer abort the rest of this block for everyone.
+                    _server?.PollEvents();
 
-                // The only place a position packet actually leaves the server.
-                _playerManager.FlushSnapshots(tick);
+                    // NPC wander AI + spawner activation (internally rate-limited).
+                    _npcAiManager.Tick();
+
+                    // Spread-out periodic saves of dirty characters.
+                    _playerManager.RunAutosave(tick);
+
+                    // The only place a position packet leaves the server.
+                    _playerManager.FlushSnapshots(tick);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error(ex, "[TickLoop] Unhandled exception in tick — continuing.");
+                }
+                finally
+                {
+                    health.Record(stopwatch.Elapsed.TotalMilliseconds);
+                }
             }
-            catch (Exception ex)
-            {
-                Logger.Error(ex, "[TickLoop] Unhandled exception in tick — continuing.");
-            }
-            finally
-            {
-                health.Record(stopwatch.Elapsed.TotalMilliseconds);
-            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal shutdown.
         }
     }
 
-    public Task StopAsync(CancellationToken cancellationToken)
+    public async Task StopAsync(CancellationToken cancellationToken)
     {
         Logger.Info("World stopping");
         _npcAiManager?.Stop();
+
+        // 1. Stop the tick loop and WAIT for it, so nothing else touches
+        //    sessions while we save them below.
         _tickCts?.Cancel();
+        if (_tickLoop != null)
+        {
+            try { await _tickLoop; }
+            catch (Exception ex) { Logger.Error(ex, "[Shutdown] Tick loop ended with an error."); }
+        }
+
+        // 2. Apply anything still queued (e.g. spawns that just finished loading).
+        _playerManager?.DrainActions();
+
+        // 3. Final save for everyone still online.
+        if (_playerManager != null)
+        {
+            var saveAll = _playerManager.SaveAllAsync();
+            var finished = await Task.WhenAny(saveAll, Task.Delay(ShutdownSaveTimeout, CancellationToken.None));
+            if (finished != saveAll)
+                Logger.Error($"[Shutdown] Final saves did not finish within {ShutdownSaveTimeout.TotalSeconds:F0}s.");
+        }
+
+        // 4. Only now drop the connections.
         _server?.Stop();
-        return Task.CompletedTask;
+        _persistenceClient?.Dispose();
     }
 
     /// <summary>
     /// Wires every [PacketOpcode]-tagged handler in this assembly into
     /// _packetDispatcher automatically. ServiceContainer is the single
-    /// source of truth for every dependency a handler constructor can ask
-    /// for. If a handler needs something new, register it here once.
+    /// source of truth for every dependency a handler constructor can ask for.
     /// </summary>
     private void RegisterPackets()
     {
@@ -229,15 +256,47 @@ public class WorldServer : IHostedService, INetEventListener
         request.AcceptIfKey(ConnectionKey);
     }
 
+    /// <summary>
+    /// Runs inside PollEvents on the tick thread. Every packet is isolated:
+    ///  - too short to hold an opcode         -> kick (not a real client)
+    ///  - payload that fails to deserialize    -> kick (malformed / tampered)
+    ///  - any other exception (a handler bug) -> log, keep the player
+    /// Either way the exception stops here, so the rest of the tick (other
+    /// players' packets, NPC AI, autosave, snapshots) still runs.
+    /// </summary>
     public void OnNetworkReceive(
         NetPeer peer,
         NetPacketReader reader,
         byte channel,
         DeliveryMethod delivery)
     {
-        Opcodes packet = (Opcodes)reader.GetUShort();
-        _packetDispatcher.Handle(packet, peer, reader);
-        reader.Recycle();
+        Opcodes packet = 0;
+
+        try
+        {
+            if (reader.AvailableBytes < sizeof(ushort))
+            {
+                Logger.Warn($"[Net] Packet too short ({reader.AvailableBytes} bytes) from {peer.Address} — disconnecting");
+                peer.Disconnect();
+                return;
+            }
+
+            packet = (Opcodes)reader.GetUShort();
+            _packetDispatcher.Handle(packet, peer, reader);
+        }
+        catch (MessagePackSerializationException ex)
+        {
+            Logger.Warn($"[Net] Malformed {packet} packet from {peer.Address} — disconnecting. {ex.Message}");
+            peer.Disconnect();
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex, $"[Net] Handler for {packet} threw (peer {peer.Address}) — packet dropped.");
+        }
+        finally
+        {
+            reader.Recycle();
+        }
     }
 
     public void OnNetworkError(

@@ -12,21 +12,12 @@ using NLog;
 namespace ArcheCore.Server.World.Managers
 {
     /// <summary>
-    /// Named PlayerSpawnManager (not just "SpawnManager") to avoid clashing
-    /// with the existing SpawnManager, which spawns world objects (NPCs,
-    /// pickups, etc.) rather than players.
-    ///
     /// Owns the full connect/disconnect lifecycle for a player: turning a
     /// pending, authenticated peer into a spawned character in the world,
-    /// and cleanly tearing that down again on disconnect (including the
-    /// save-on-disconnect call and interest-list cleanup).
+    /// and tearing that down again on disconnect (including the
+    /// save-on-disconnect call, interest cleanup and snapshot removal).
     ///
-    /// CHANGED: now also owns the matching SnapshotDispatcher lifecycle -
-    /// SetTransform on spawn (so a freshly-spawned player has an entry
-    /// before their first move, instead of being invisible to nearby
-    /// observers' snapshots until they take a step) and Remove on
-    /// disconnect (so a departed player's stale transform doesn't linger
-    /// and get replicated to observers as a ghost).
+    /// Tick thread only.
     /// </summary>
     public class PlayerSpawnManager
     {
@@ -70,11 +61,29 @@ namespace ArcheCore.Server.World.Managers
         public void HandlePlayerConnected(
             NetPeer peer,
             int accountId,
-            P2WCharacterLoadResponse character)
+            P2WCharacterLoadResponse character,
+            bool isNewCharacter)
         {
-            if (_sessions.TryGetAccountPeer(accountId, out var existingPeer))
+            // The peer may have disconnected while the character was loading
+            // from the persistence server. Spawning it now would create a
+            // ghost that nothing ever cleans up.
+            if (peer.ConnectionState != ConnectionState.Connected)
             {
-                Logger.Info($"Duplicate login Account={accountId}");
+                Logger.Info($"[Spawn] Account={accountId} disconnected before spawning - skipped.");
+                return;
+            }
+
+            // Already in world (duplicate request slipped through) - never spawn twice.
+            if (peer.Tag is PlayerSession { NetworkId: not null })
+            {
+                Logger.Warn($"[Spawn] Account={accountId} is already in world - duplicate spawn ignored.");
+                return;
+            }
+
+            // Same account logged in from a DIFFERENT connection: kick the old one.
+            if (_sessions.TryGetAccountPeer(accountId, out var existingPeer) && existingPeer != peer)
+            {
+                Logger.Info($"Duplicate login Account={accountId} - disconnecting previous connection");
 
                 CleanupPeer(existingPeer, true);
                 existingPeer.Disconnect();
@@ -84,16 +93,10 @@ namespace ArcheCore.Server.World.Managers
 
             W2CMOTDPacketSender.Send(peer, _worldConfig.MOTD);
 
-            int newId = SpawnPlayer(peer, accountId, character);
+            int newId = SpawnPlayer(peer, accountId, character, isNewCharacter);
 
             var luaPlayer = new LuaPlayer(peer, newId, accountId, _replication);
             _luaEngine.FireEvent(PlayerEvent.OnConnect, luaPlayer);
-
-            // No full-world NPC dump any more - SpawnPlayer already sent
-            // spawn packets for every NPC that was in `entered` (i.e.
-            // active and near this player's spawn point). A new player
-            // simply doesn't get told about NPCs nobody's near yet,
-            // because those NPCs don't exist server-side until someone is.
 
             _demoManager.OnPlayerJoin(peer);
         }
@@ -105,23 +108,12 @@ namespace ArcheCore.Server.World.Managers
 
         public void CleanupPeer(NetPeer peer, bool save)
         {
-            // Peer never made it past character select (or never
-            // authenticated at all) - nothing spawned, nothing to clean up.
-            // Tag either holds no session, or a pending one with no
-            // NetworkId; either way it's dropped when the peer object is,
-            // no explicit removal required.
+            // Never spawned (or never authenticated) - nothing to clean up.
             if (peer.Tag is not PlayerSession { NetworkId: int networkId } session)
                 return;
 
-            if (save)
-            {
-                _persistence.SaveCharacterAsync(
-                    session.CharacterId,
-                    session.AccountId,
-                    session.Name,
-                    session.Level,
-                    session.Position);
-            }
+            if (save && session.IsDirty)
+                _persistence.SaveInBackground(session);
 
             _sessions.UnregisterAccountPeerIfCurrent(session.AccountId, peer);
 
@@ -145,16 +137,13 @@ namespace ArcheCore.Server.World.Managers
         private int SpawnPlayer(
             NetPeer peer,
             int accountId,
-            P2WCharacterLoadResponse character)
+            P2WCharacterLoadResponse character,
+            bool isNewCharacter)
         {
             int networkId = _sessions.NextNetworkId();
 
             Vector3 spawn = new(character.X, character.Y, character.Z);
 
-            // Session was created back in TrackPendingSelection; fill in
-            // everything that was missing until now. Assigning NetworkId
-            // here is what turns "pending" into "in-world" - nothing else
-            // needs to explicitly clear the pending state.
             var session = peer.Tag as PlayerSession
                 ?? new PlayerSession { AccountId = accountId };
 
@@ -163,8 +152,21 @@ namespace ArcheCore.Server.World.Managers
             session.Name = character.Name;
             session.Level = character.Level;
             session.Position = spawn;
+            session.SpawnRequested = true;
 
             peer.Tag = session;
+
+            if (isNewCharacter)
+            {
+                // The DB row was created with a placeholder position; write the
+                // real spawn point now instead of waiting for the first autosave.
+                _persistence.SaveInBackground(session);
+            }
+            else
+            {
+                // Just loaded - memory matches the database.
+                session.MarkSaved();
+            }
 
             _sessions.RegisterNetworkId(networkId, peer);
             _snapshots.SetTransform(networkId, spawn, yaw: 0f, isNpc: false, _clock.Current);
@@ -175,9 +177,6 @@ namespace ArcheCore.Server.World.Managers
 
             foreach (var otherId in entered)
             {
-                // Active NPC already standing near this player's spawn
-                // point - only the new player needs telling, there's no
-                // peer on the NPC side to notify back.
                 if (SpawnManager.IsNpcId(otherId))
                 {
                     if (_worldSpawnManager.TryGetNpc(otherId, out var npc))

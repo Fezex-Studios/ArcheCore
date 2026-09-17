@@ -11,9 +11,11 @@ namespace ArcheCore.Server.World.PersistenceServer.Senders
         public W2PCharacterSaveSender(PersistenceClient client)
             => _client = client;
 
-        // Fire-and-forget, matching the original — /characters/save never
-        // returned a body under TCP either.
-        public Task Send(
+        /// <summary>
+        /// Returns true if the persistence server confirmed the save (2xx),
+        /// false if it returned an error. Throws on network errors/timeouts.
+        /// </summary>
+        public Task<bool> Send(
             long   characterId,
             int    accountId,
             string name,
@@ -21,7 +23,7 @@ namespace ArcheCore.Server.World.PersistenceServer.Senders
             float  x,
             float  y,
             float  z)
-            => _client.PostAsync(
+            => _client.PostForStatusAsync(
                 "/characters/save",
                 new W2PCharacterSaveRequest
                 {

@@ -69,6 +69,21 @@ namespace Worldserver.ArcheCore.PersistenceServer.Scripts
             return await MessagePackSerializer.DeserializeAsync<TResponse>(stream);
         }
 
+        // Like the fire-and-forget overload below, but reports whether the
+        // server actually accepted the request (2xx). Still throws on network
+        // errors/timeouts - callers must catch.
+        internal async Task<bool> PostForStatusAsync<TRequest>(string route, TRequest payload)
+        {
+            using var content = BuildContent(payload);
+
+            var httpResponse = await _http.PostAsync(route, content);
+
+            if (!httpResponse.IsSuccessStatusCode)
+                Logger.Warn($"[PersistenceClient] {route} returned {(int)httpResponse.StatusCode}");
+
+            return httpResponse.IsSuccessStatusCode;
+        }
+
         // Fire-and-forget-style — Save and HelloWorld never returned a body
         // even under TCP. Status code is checked purely for logging now,
         // which is more visibility than the old version had, not less.

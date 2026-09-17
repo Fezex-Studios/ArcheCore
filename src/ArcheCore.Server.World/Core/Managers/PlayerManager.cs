@@ -1,7 +1,8 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Numerics;
+using System.Threading.Tasks;
 using ArcheCore.Network.Shared.Packets.PersistenceServer.P2W;
 using ArcheCore.Server.World.Core.Interaction;
 using ArcheCore.Server.World.Lua.Scripting;
@@ -25,6 +26,7 @@ namespace ArcheCore.Server.World.Managers
         private readonly PlayerMovementBroadcaster _movement;
         private readonly PlayerSpawnManager _spawn;
         private readonly CharacterPersistence _persistence;
+        private readonly AutosaveScheduler _autosave;
         private readonly SnapshotDispatcher _snapshots;
         private readonly TickClock _clock;
 
@@ -47,13 +49,13 @@ namespace ArcheCore.Server.World.Managers
             _interest = interest;
 
             _sessions = new SessionManager();
-            _persistence = new CharacterPersistence(persistence);
+            _persistence = new CharacterPersistence(persistence, EnqueueAction);
+            _autosave = new AutosaveScheduler(
+                _sessions, _persistence, worldConfig.AutosaveIntervalSeconds, worldConfig.TickRate);
             _clock = new TickClock();
 
             // One dispatcher, shared by movement (writes transforms) and
             // spawn (writes the initial transform + removes on disconnect).
-            // Opcodes.W2CWorldSnapshot must exist in ArcheCore.Network -
-            // see Opcodes.cs patch.
             _snapshots = new SnapshotDispatcher(
                 _sessions, _interest, (ushort)ArcheCore.Library.Net.Worldserver.Opcodes.W2CWorldSnapshot);
 
@@ -85,21 +87,48 @@ namespace ArcheCore.Server.World.Managers
             }
         }
 
-        // --- Replication tick (new) ---
+        // --- Tick hooks (called by WorldServer.RunTickLoopAsync) ---
 
-        /// <summary>
-        /// Call once per tick, before PollEvents, from WorldServer's tick
-        /// loop - sets what "now" is for any SetTransform call that happens
-        /// mid-tick while movement packets are being processed.
-        /// </summary>
+        /// <summary>Before PollEvents: sets "now" for SetTransform calls made mid-tick.</summary>
         public void AdvanceTick(uint tick) => _clock.Advance(tick);
 
-        /// <summary>
-        /// Call once per tick, after PollEvents/DrainActions, from
-        /// WorldServer's tick loop - this is the only place a position
-        /// packet actually leaves the server now.
-        /// </summary>
+        /// <summary>After PollEvents: the only place position packets leave the server.</summary>
         public void FlushSnapshots(uint tick) => _snapshots.Flush(tick);
+
+        /// <summary>Once per tick: saves this tick's slice of dirty characters.</summary>
+        public void RunAutosave(uint tick) => _autosave.Tick(tick);
+
+        /// <summary>
+        /// Shutdown only - call AFTER the tick loop has stopped (this touches
+        /// sessions from the calling thread). Saves every in-world character
+        /// that has unsaved changes and waits for all of them.
+        /// </summary>
+        public async Task SaveAllAsync()
+        {
+            var saves = new List<Task<bool>>();
+
+            foreach (var peer in _sessions.GetAllConnectedPeers())
+            {
+                if (peer.Tag is not PlayerSession { NetworkId: not null } s || !s.IsDirty)
+                    continue;
+
+                saves.Add(_persistence.SaveAsync(s.CharacterId, s.AccountId, s.Name, s.Level, s.Position));
+                s.MarkSaved();
+            }
+
+            if (saves.Count == 0)
+                return;
+
+            Logger.Info($"[Shutdown] Saving {saves.Count} character(s)...");
+            var results = await Task.WhenAll(saves);
+
+            int failed = 0;
+            foreach (var ok in results)
+                if (!ok) failed++;
+
+            if (failed == 0) Logger.Info("[Shutdown] All characters saved.");
+            else             Logger.Error($"[Shutdown] {failed} of {results.Length} character save(s) FAILED.");
+        }
 
         // --- Session lookups (delegated to SessionManager) ---
 
@@ -124,19 +153,23 @@ namespace ArcheCore.Server.World.Managers
         public int? GetPendingAccountId(NetPeer peer) =>
             _sessions.GetPendingAccountId(peer);
 
+        /// <summary>See SessionManager.TryBeginSpawn - one select/create per peer.</summary>
+        public bool TryBeginSpawn(NetPeer peer) =>
+            _sessions.TryBeginSpawn(peer);
+
         public int GetLevel(NetPeer peer) => _sessions.GetLevel(peer);
 
         public long GetCharacterId(NetPeer peer) => _sessions.GetCharacterId(peer);
 
-        // NEW — needed so CharacterData responses can include the name.
         public string GetName(NetPeer peer) => _sessions.GetName(peer);
 
         // --- Spawn/connect lifecycle (delegated to PlayerSpawnManager) ---
 
         public void HandlePlayerConnected(
             NetPeer peer, int accountId,
-            P2WCharacterLoadResponse character) =>
-            _spawn.HandlePlayerConnected(peer, accountId, character);
+            P2WCharacterLoadResponse character,
+            bool isNewCharacter = false) =>
+            _spawn.HandlePlayerConnected(peer, accountId, character, isNewCharacter);
 
         public void HandlePlayerDisconnected(NetPeer peer) =>
             _spawn.HandlePlayerDisconnected(peer);
@@ -170,10 +203,10 @@ namespace ArcheCore.Server.World.Managers
 
         public int LevelUp(NetPeer peer)
         {
-            if (!TryGetSession(peer, out var session)) return -1;
+            if (!TryGetSession(peer, out var session) || session.NetworkId == null) return -1;
             session.Level += 1;
 
-            _persistence.SaveCharacterAsync(session.CharacterId, session.AccountId, session.Name, session.Level, session.Position);
+            _persistence.SaveInBackground(session);
             return session.Level;
         }
     }
