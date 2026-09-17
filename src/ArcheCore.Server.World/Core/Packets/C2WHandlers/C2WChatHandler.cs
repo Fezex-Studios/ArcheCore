@@ -24,6 +24,11 @@ public class C2WChatHandler : IPacketHandler
         private readonly InterestManager    _interest;
         private readonly ReplicationManager _replication;
 
+        // Reused across Shout calls so the radius query doesn't allocate a
+        // fresh list per shout - GetNearbyAtRadius now writes into a
+        // caller-owned buffer instead of returning a new List<int>.
+        private readonly List<int> _shoutScratch = new(capacity: 64);
+
         public C2WChatHandler(
             PlayerManager      playerManager,
             InterestManager    interest,
@@ -65,8 +70,9 @@ public class C2WChatHandler : IPacketHandler
                     break;
 
                 case ChatChannel.Shout:
+                    _interest.GetNearbyAtRadius(networkId, ShoutRadiusCells, _shoutScratch);
                     SendToRecipients(
-                        _interest.GetNearbyAtRadius(networkId, ShoutRadiusCells),
+                        _shoutScratch,
                         peer, networkId, session.Name, message, request.Channel);
                     break;
 

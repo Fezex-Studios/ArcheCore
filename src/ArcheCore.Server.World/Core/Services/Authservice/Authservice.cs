@@ -1,5 +1,4 @@
-﻿
-using System.Text;
+﻿using System.Text;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 using NLog;
@@ -40,8 +39,31 @@ namespace ArcheCore.Server.World.Core.Services.Authservice
             public int AccountId;
         }
 
-        public  async Task<int> ValidateToken(string token)
+        // Bots load-tested locally never need a real account row, a real
+        // login, or a real session — only a stable, unique AccountId the
+        // rest of the pipeline (character list / select / create) can key
+        // off. The 900000 offset keeps these out of your real account id
+        // range so they can never collide with or masquerade as a real
+        // player, and the prefix makes them trivially greppable in logs.
+        private const string LoadTestTokenPrefix = "loadtest:";
+        private const int LoadTestAccountIdOffset = 900_000;
+
+        public async Task<int> ValidateToken(string token)
         {
+            if (_worldConfig.AllowLoadTestBypass
+                && token is not null
+                && token.StartsWith(LoadTestTokenPrefix, StringComparison.Ordinal))
+            {
+                var suffix = token.AsSpan(LoadTestTokenPrefix.Length);
+                if (int.TryParse(suffix, out var botIndex))
+                {
+                    var accountId = LoadTestAccountIdOffset + botIndex;
+                    Logger.Warn($"[AuthService] LOAD-TEST BYPASS active — token '{token}' -> AccountId={accountId}. " +
+                                 "AllowLoadTestBypass must be false outside a load test.");
+                    return accountId;
+                }
+            }
+
             try
             {
                 string url  = $"{_worldConfig.AuthServerUrl}/validate-session";

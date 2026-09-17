@@ -30,6 +30,7 @@
         ItemDataResponse           = 26,
         LevelUp = 28,   // NEW
         PlayerSpawned = 29,
+        W2CWorldSnapshot = 30, // W2C: batched, quantized per-tick movement snapshot (unreliable) — see SnapshotDispatcher/SnapshotWriter
         
     }
 }

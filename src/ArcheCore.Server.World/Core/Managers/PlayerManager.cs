@@ -6,6 +6,7 @@ using ArcheCore.Network.Shared.Packets.PersistenceServer.P2W;
 using ArcheCore.Server.World.Core.Interaction;
 using ArcheCore.Server.World.Lua.Scripting;
 using ArcheCore.Server.World.Lua.Scripting.Bindings;
+using ArcheCore.Server.World.Replication;
 using ArcheCore.Server.World.Utils.Config;
 using LiteNetLib;
 using NLog;
@@ -24,6 +25,8 @@ namespace ArcheCore.Server.World.Managers
         private readonly PlayerMovementBroadcaster _movement;
         private readonly PlayerSpawnManager _spawn;
         private readonly CharacterPersistence _persistence;
+        private readonly SnapshotDispatcher _snapshots;
+        private readonly TickClock _clock;
 
         public InterestManager Interest => _interest;
 
@@ -45,10 +48,22 @@ namespace ArcheCore.Server.World.Managers
 
             _sessions = new SessionManager();
             _persistence = new CharacterPersistence(persistence);
-            _movement = new PlayerMovementBroadcaster(_sessions, _interest, _replication, spawnManager);
+            _clock = new TickClock();
+
+            // One dispatcher, shared by movement (writes transforms) and
+            // spawn (writes the initial transform + removes on disconnect).
+            // Opcodes.W2CWorldSnapshot must exist in ArcheCore.Network -
+            // see Opcodes.cs patch.
+            _snapshots = new SnapshotDispatcher(
+                _sessions, _interest, (ushort)ArcheCore.Library.Net.Worldserver.Opcodes.W2CWorldSnapshot);
+
+            _movement = new PlayerMovementBroadcaster(
+                _sessions, _interest, _replication, spawnManager, _snapshots, _clock);
+
             _spawn = new PlayerSpawnManager(
                 _sessions, _persistence, _replication, _interest,
-                _luaEngine, worldConfig, demoManager, spawnManager);
+                _luaEngine, worldConfig, demoManager, spawnManager,
+                _snapshots, _clock);
         }
 
         public void InitializeScripts() => _luaEngine.LoadAllScripts(Lua);
@@ -69,6 +84,22 @@ namespace ArcheCore.Server.World.Managers
                 }
             }
         }
+
+        // --- Replication tick (new) ---
+
+        /// <summary>
+        /// Call once per tick, before PollEvents, from WorldServer's tick
+        /// loop - sets what "now" is for any SetTransform call that happens
+        /// mid-tick while movement packets are being processed.
+        /// </summary>
+        public void AdvanceTick(uint tick) => _clock.Advance(tick);
+
+        /// <summary>
+        /// Call once per tick, after PollEvents/DrainActions, from
+        /// WorldServer's tick loop - this is the only place a position
+        /// packet actually leaves the server now.
+        /// </summary>
+        public void FlushSnapshots(uint tick) => _snapshots.Flush(tick);
 
         // --- Session lookups (delegated to SessionManager) ---
 
@@ -115,8 +146,8 @@ namespace ArcheCore.Server.World.Managers
         public bool TryGetPosition(int networkId, out Vector3 position) =>
             _movement.TryGetPosition(networkId, out position);
 
-        public void BroadcastPosition(NetPeer sender, int networkId, Vector3 position) =>
-            _movement.BroadcastPosition(sender, networkId, position);
+        public void BroadcastPosition(NetPeer sender, int networkId, Vector3 position, float yaw = 0f) =>
+            _movement.BroadcastPosition(sender, networkId, position, yaw);
 
         // --- Interaction system ---
 

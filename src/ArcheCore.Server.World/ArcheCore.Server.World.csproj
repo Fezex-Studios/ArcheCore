@@ -5,6 +5,28 @@
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+
+        <!--
+        Console/worker Exe projects default to Workstation GC, which is
+        tuned for a desktop app doing occasional small allocations with a
+        premium on pause latency for UI responsiveness. A server fielding
+        thousands of concurrent socket sends/receives per second - each
+        one allocating via MessagePack serialization, NetDataWriter, etc
+        - is exactly the workload Server GC exists for: multiple heaps,
+        one per core, collected in parallel, built for throughput under
+        sustained allocation pressure instead of minimizing any single
+        pause. ConcurrentGarbageCollection keeps most Gen2 work off the
+        thread doing the actual collection so it doesn't have to fully
+        stop everything.
+
+        This was almost certainly the direct cause of TickHealth logging
+        183 Gen2 collections in one 5-second window with p99 tick time
+        over 9 seconds - Workstation GC's pauses stacking up on the
+        single tick thread under an allocation rate it was never designed
+        for.
+        -->
+        <ServerGarbageCollection>true</ServerGarbageCollection>
+        <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
     </PropertyGroup>
 
     <ItemGroup>

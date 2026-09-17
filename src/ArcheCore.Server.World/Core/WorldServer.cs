@@ -18,7 +18,7 @@ using Shared.AuthService;
 using Worldserver.ArcheCore.PersistenceServer.Scripts;
 
 namespace ArcheCore.Server.World;
-public class WorldServer : IHostedService,INetEventListener
+public class WorldServer : IHostedService, INetEventListener
 {
     // Utils
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
@@ -27,9 +27,8 @@ public class WorldServer : IHostedService,INetEventListener
     private readonly IServiceScopeFactory _scopeFactory;
     private PacketDispatcher _packetDispatcher;
     private readonly GameDataPatchRunner _dataPatchRunner;
-    private readonly IDbContextFactory<WorldDataDbContext> _dbFactory;  // add
+    private readonly IDbContextFactory<WorldDataDbContext> _dbFactory;
 
-    
     // Managers
     private readonly QuestManager _questManager;
     private readonly ItemManager _itemManager;
@@ -43,19 +42,15 @@ public class WorldServer : IHostedService,INetEventListener
     private CancellationTokenSource _tickCts;
     private PersistenceClient _persistenceClient;
     private DemoManager _demoManager;
-    
-    
+
     // Services
     private readonly DemoService _demoService;
     private readonly AuthService _authService;
     private readonly SpawnPointService _spawnPoints;
-    
-    
+
     private const string ConnectionKey = "MMO";
-    
 
     public WorldServer(
-        
         IOptions<WorldServerConfig> world,
         IServiceScopeFactory scopeFactory,
         IOptions<NetworkConfig> network,
@@ -66,11 +61,8 @@ public class WorldServer : IHostedService,INetEventListener
         GameDataPatchRunner dataPatchRunner,
         IDbContextFactory<WorldDataDbContext> dbFactory,
         DemoManager demoManager,
-        SpawnPointService spawnPoints
-        
-        )
+        SpawnPointService spawnPoints)
     {
-       
         _world = world.Value;
         _network = network.Value;
         _questManager = questManager;
@@ -86,7 +78,7 @@ public class WorldServer : IHostedService,INetEventListener
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        // 0. Run DB patches first
+        // 0. Apply EF Core migrations to worldserver.db
         await using var db = await _dbFactory.CreateDbContextAsync();
         await db.Database.MigrateAsync();
 
@@ -107,11 +99,10 @@ public class WorldServer : IHostedService,INetEventListener
         _playerManager = new PlayerManager(_spawnManager, _replicationManager, _world, _persistenceClient, _demoManager, _interestManager);
         _playerManager.InitializeScripts();
 
-        // NpcAiManager owns wander AI + spawner-radius activation on its
-        // own thread (see NpcAiManager for why: mirrors AAEmu's
-        // ActiveRegionTick being split off the main loop). Started below,
-        // after spawner definitions are loaded and the network/tick loop
-        // is up.
+        // NpcAiManager owns wander AI + spawner-radius activation. It has no
+        // thread of its own - RunTickLoopAsync calls Tick() once per tick,
+        // on the same thread as everything else that touches
+        // InterestManager/SpatialGrid (neither of which is thread-safe).
         _npcAiManager = new NpcAiManager(_spawnManager, _interestManager, _replicationManager, _playerManager);
 
         // 3. Load game data
@@ -131,37 +122,63 @@ public class WorldServer : IHostedService,INetEventListener
             "World started | {Host}:{Port} | TickRate={TickRate} | MaxPlayers={MaxPlayers}",
             _network.Host, _network.Port, _world.TickRate, _world.MaxPlayers);
 
-        // 6. Load NPC spawner definitions from DB. This no longer spawns
-        // anything - spawners start dormant and NpcAiManager activates
-        // them once a player is actually nearby (fix for the old
-        // "spawn every NPC in the world at boot, dump them all to every
-        // connecting client" behavior).
+        // 6. Load NPC spawner definitions from DB. Spawns nothing - spawners
+        // start dormant and NpcAiManager.Tick() activates them once a player
+        // is actually nearby.
         _spawnManager.LoadSpawnerDefinitions();
 
         // 7. Services
         await _demoService.RunService();
 
-        // 8. Start tick loop + NPC AI (separate thread - see NpcAiManager)
+        // 8. Reset NPC AI timers, then start the tick loop (which drives NPC AI).
+        _npcAiManager.Start();
         _tickCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _ = RunTickLoopAsync(_tickCts.Token);
-        _npcAiManager.Start();
     }
 
     private async Task RunTickLoopAsync(CancellationToken ct)
     {
         var interval = TimeSpan.FromMilliseconds(1000.0 / _world.TickRate);
         using var timer = new PeriodicTimer(interval);
+        uint tick = 0;
+
+        // Server's own opinion of its health, logged every ~5s regardless
+        // of what any client-side tool reports.
+        var health = new TickHealthMonitor(_world.TickRate, msg => Logger.Info(msg));
+        var stopwatch = new System.Diagnostics.Stopwatch();
 
         while (!ct.IsCancellationRequested && await timer.WaitForNextTickAsync(ct))
         {
+            stopwatch.Restart();
             try
             {
+                tick++;
+
+                // Must happen before PollEvents: movement packets are
+                // processed synchronously inside PollEvents, and
+                // PlayerMovementBroadcaster timestamps SetTransform with
+                // whatever TickClock currently holds.
+                _playerManager.AdvanceTick(tick);
+
                 _playerManager.DrainActions();
                 _server?.PollEvents();
+
+                // NPC wander AI + spawner activation. Internally rate-limited
+                // (AI every 300ms, spawner scan every 1s), so this is cheap on
+                // ticks where neither is due. The spawn/despawn/move work it
+                // queues via EnqueueAction runs at the next DrainActions.
+                _npcAiManager.Tick();
+
+                // The only place a position packet actually leaves the server.
+                _playerManager.FlushSnapshots(tick);
             }
             catch (Exception ex)
             {
                 Logger.Error(ex, "[TickLoop] Unhandled exception in tick — continuing.");
+            }
+            finally
+            {
+                health.Record(stopwatch.Elapsed.TotalMilliseconds);
             }
         }
     }
@@ -174,15 +191,12 @@ public class WorldServer : IHostedService,INetEventListener
         _server?.Stop();
         return Task.CompletedTask;
     }
+
     /// <summary>
     /// Wires every [PacketOpcode]-tagged handler in this assembly into
-    /// _packetDispatcher automatically. Adding a new packet handler no
-    /// longer requires an edit here at all — see
-    /// ArcheCore.Server.World/ADDING_PACKETS.md.
-    ///
-    /// ServiceContainer is the single source of truth for every dependency
-    /// a handler constructor can ask for. If a handler needs something new,
-    /// register it here once; AutoRegister resolves the rest by reflection.
+    /// _packetDispatcher automatically. ServiceContainer is the single
+    /// source of truth for every dependency a handler constructor can ask
+    /// for. If a handler needs something new, register it here once.
     /// </summary>
     private void RegisterPackets()
     {
@@ -199,21 +213,22 @@ public class WorldServer : IHostedService,INetEventListener
 
         _packetDispatcher.AutoRegister(services.Resolve, typeof(WorldServer).Assembly);
     }
-        
-    
-    
+
     public void OnPeerConnected(NetPeer peer)
     {
         Logger.Info($"Client connected: {peer.Address}");
     }
+
     public void OnPeerDisconnected(NetPeer peer, DisconnectInfo info)
     {
         _playerManager.HandlePlayerDisconnected(peer);
     }
+
     public void OnConnectionRequest(ConnectionRequest request)
     {
         request.AcceptIfKey(ConnectionKey);
     }
+
     public void OnNetworkReceive(
         NetPeer peer,
         NetPacketReader reader,
@@ -224,12 +239,14 @@ public class WorldServer : IHostedService,INetEventListener
         _packetDispatcher.Handle(packet, peer, reader);
         reader.Recycle();
     }
+
     public void OnNetworkError(
         System.Net.IPEndPoint endPoint,
         System.Net.Sockets.SocketError error)
     {
         Logger.Warn($"Network Error: {error}");
     }
+
     public void OnNetworkLatencyUpdate(NetPeer peer, int latency) { }
 
     public void OnNetworkReceiveUnconnected(
@@ -237,6 +254,5 @@ public class WorldServer : IHostedService,INetEventListener
         NetPacketReader reader,
         UnconnectedMessageType messageType)
     {
-        
     }
 }

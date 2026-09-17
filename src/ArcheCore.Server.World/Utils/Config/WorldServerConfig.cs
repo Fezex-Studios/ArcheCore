@@ -8,4 +8,14 @@ public class WorldServerConfig
     public String AuthServerUrl    { get; set; } = String.Empty;
     public String InternalSecret   { get; set; } = String.Empty;
     public String PersistenceBaseUrl { get; set; } = "http://127.0.0.1:7778"; // e.g. "http://127.0.0.1:7778"
+
+    /// <summary>
+    /// DEV/LOAD-TEST ONLY. When true, AuthService accepts tokens of the
+    /// form "loadtest:{n}" and returns account id (900000 + n) WITHOUT
+    /// calling the real AuthServer. Never true outside a local/staging
+    /// load-test run — this is a full auth bypass with no code path that
+    /// flips it on automatically; it only does anything if you set it in
+    /// appsettings yourself.
+    /// </summary>
+    public bool AllowLoadTestBypass { get; set; } = false;
 }
