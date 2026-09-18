@@ -29,6 +29,17 @@ namespace ArcheCore.Server.World.Replication
     /// units, so every entity a player can see is representable with a lot
     /// of headroom. Anything outside that range is clamped, which is
     /// correct: it's about to leave the interest set anyway.
+    ///
+    /// ADDED: optional velocity, three SIGNED BYTES at 1/4 unit-per-second
+    /// resolution. Deliberately the cheapest useful encoding rather than
+    /// matching position's precision, for two reasons. Velocity is only
+    /// ever used to extrapolate across a gap of at most a few hundred
+    /// milliseconds, so an error of 0.25 u/s is a couple of centimetres of
+    /// drift that the next real update corrects anyway. And it is optional
+    /// per entry (see EntryFlags.Velocity) precisely so the dispatcher can
+    /// spend those three bytes only on near-tier entities, where
+    /// extrapolation is actually visible, and keep far-tier entries at the
+    /// original 12 bytes.
     /// </summary>
     public static class EntityStateCodec
     {
@@ -38,6 +49,22 @@ namespace ArcheCore.Server.World.Replication
         /// <summary>Max representable offset from origin, in world units.</summary>
         public const float MaxOffset = short.MaxValue / PositionScale; // ~511.98
 
+        /// <summary>
+        /// Velocity fixed-point scale. 4 = 1/4 unit/sec precision in a
+        /// signed byte, giving a representable range of +/-31.75 u/s.
+        /// Walk is 5 u/s and a jump leaves the ground at ~7.7 u/s, so the
+        /// only thing that realistically saturates this is terminal
+        /// velocity on a long fall — which clamps, and a clamped downward
+        /// velocity extrapolates a falling body slightly too slowly for a
+        /// fraction of a second. That is a much better failure than
+        /// spending twice the bytes on every entry to represent a case the
+        /// player barely sees.
+        /// </summary>
+        public const float VelocityScale = 4f;
+
+        /// <summary>Max representable speed per axis, in units/second.</summary>
+        public const float MaxVelocity = sbyte.MaxValue / VelocityScale; // 31.75
+
         [Flags]
         public enum EntryFlags : byte
         {
@@ -45,7 +72,15 @@ namespace ArcheCore.Server.World.Replication
             Position = 1 << 0,
             Yaw      = 1 << 1,
             IsNpc    = 1 << 2,
-            // Reserved for later: velocity hint, state/anim id, dead flag.
+
+            /// <summary>
+            /// Entry carries three velocity bytes after the yaw byte. Set
+            /// only for near-tier entities; the reader must branch on this
+            /// rather than assuming a fixed entry size, or it will walk off
+            /// into the next entry.
+            /// </summary>
+            Velocity = 1 << 3,
+            // Reserved for later: state/anim id, dead flag.
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -63,6 +98,29 @@ namespace ArcheCore.Server.World.Replication
         public static float Dequantize(short quantized, int origin)
         {
             return origin + (quantized / PositionScale);
+        }
+
+        /// <summary>
+        /// Velocity component to a signed byte. Clamps rather than wraps -
+        /// a velocity past the representable range is a fast fall, and the
+        /// nearest representable fast fall is a far better answer than a
+        /// wrapped one pointing the opposite direction.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static sbyte QuantizeVelocity(float unitsPerSecond)
+        {
+            var scaled = unitsPerSecond * VelocityScale;
+
+            if (scaled > sbyte.MaxValue) return sbyte.MaxValue;
+            if (scaled < sbyte.MinValue) return sbyte.MinValue;
+
+            return (sbyte)scaled;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float DequantizeVelocity(sbyte quantized)
+        {
+            return quantized / VelocityScale;
         }
 
         /// <summary>

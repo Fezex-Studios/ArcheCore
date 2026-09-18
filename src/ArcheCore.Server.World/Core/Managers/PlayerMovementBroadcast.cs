@@ -21,6 +21,15 @@ namespace ArcheCore.Server.World.Managers
     /// despawn is exactly the kind of event that must never be dropped.
     /// SnapshotDispatcher.Flush, called once per tick from WorldServer,
     /// is the only place a position packet actually goes out now.
+    ///
+    /// CHANGED AGAIN: velocity and yaw now come in from the client and get
+    /// recorded with the position. Neither is used for simulation here -
+    /// they exist purely so observers can render the mover smoothly.
+    /// Velocity lets them extrapolate through a dropped snapshot instead of
+    /// freezing, and yaw is carried separately from the direction of travel
+    /// because a player with mouse-look held faces the camera, not the way
+    /// they're moving, and a player turning on the spot has a facing that
+    /// changes while velocity stays zero.
     /// </summary>
     public class PlayerMovementBroadcaster
     {
@@ -59,7 +68,21 @@ namespace ArcheCore.Server.World.Managers
             return false;
         }
 
-        public void BroadcastPosition(NetPeer sender, int networkId, Vector3 position, float yaw = 0f)
+        /// <param name="velocity">
+        /// Client-reported, world units per second. Trusted the same amount
+        /// as the position is - which is to say, not at all in a security
+        /// sense, but it is only ever used for other clients' rendering, so
+        /// a lie here makes a cheater's character look wrong to other
+        /// people rather than giving them an advantage. See the note in
+        /// C2WMovementHandler about where real validation belongs.
+        /// </param>
+        /// <param name="yaw">Facing, in radians.</param>
+        public void BroadcastPosition(
+            NetPeer sender,
+            int networkId,
+            Vector3 position,
+            Vector3 velocity = default,
+            float yaw = 0f)
         {
             if (sender.Tag is PlayerSession senderSession)
                 senderSession.Position = position;
@@ -106,7 +129,7 @@ namespace ArcheCore.Server.World.Managers
             // happens here - just a dictionary write. SnapshotDispatcher
             // picks this up on the next Flush(tick) and decides who
             // actually needs to hear about it, at what rate, per observer.
-            _snapshots.SetTransform(networkId, position, yaw, isNpc: false, _clock.Current);
+            _snapshots.SetTransform(networkId, position, velocity, yaw, isNpc: false, _clock.Current);
         }
     }
 }

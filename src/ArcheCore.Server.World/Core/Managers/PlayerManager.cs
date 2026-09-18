@@ -54,8 +54,9 @@ namespace ArcheCore.Server.World.Managers
                 _sessions, _persistence, worldConfig.AutosaveIntervalSeconds, worldConfig.TickRate);
             _clock = new TickClock();
 
-            // One dispatcher, shared by movement (writes transforms) and
-            // spawn (writes the initial transform + removes on disconnect).
+            // One dispatcher, shared by movement (writes transforms), spawn
+            // (writes the initial transform + removes on disconnect), and
+            // now NpcAiManager via SetNpcTransform/RemoveReplicatedEntity.
             _snapshots = new SnapshotDispatcher(
                 _sessions, _interest, (ushort)ArcheCore.Library.Net.Worldserver.Opcodes.W2CWorldSnapshot);
 
@@ -179,8 +180,40 @@ namespace ArcheCore.Server.World.Managers
         public bool TryGetPosition(int networkId, out Vector3 position) =>
             _movement.TryGetPosition(networkId, out position);
 
-        public void BroadcastPosition(NetPeer sender, int networkId, Vector3 position, float yaw = 0f) =>
-            _movement.BroadcastPosition(sender, networkId, position, yaw);
+        /// <param name="velocity">
+        /// World units/second, client-reported. Note the parameter ORDER:
+        /// velocity comes before yaw. Both are presentation state for other
+        /// clients and neither feeds simulation.
+        /// </param>
+        public void BroadcastPosition(
+            NetPeer sender, int networkId, Vector3 position,
+            Vector3 velocity = default, float yaw = 0f) =>
+            _movement.BroadcastPosition(sender, networkId, position, velocity, yaw);
+
+        // --- Replication surface for non-player entities ---
+        //
+        // NpcAiManager needs to write into the same transform store players
+        // use, but SnapshotDispatcher and TickClock are both constructed and
+        // owned here. These two methods are the whole surface rather than
+        // exposing the dispatcher, so "what tick is it" stays a detail of
+        // this class and callers can't accidentally write a stale timestamp.
+
+        /// <summary>
+        /// Record an NPC's transform for the next snapshot flush. Cheap by
+        /// design - one dictionary write, no sends.
+        /// </summary>
+        /// <param name="yaw">Facing, in radians.</param>
+        public void SetNpcTransform(int networkId, Vector3 position, Vector3 velocity, float yaw) =>
+            _snapshots.SetTransform(networkId, position, velocity, yaw, isNpc: true, _clock.Current);
+
+        /// <summary>
+        /// Drop an entity from the transform store. MUST be called when any
+        /// replicated entity despawns - the store has no other pruning, so a
+        /// missed call is a permanent leak, and for NPCs (whose spawners
+        /// cycle continuously as players move) an unbounded one.
+        /// </summary>
+        public void RemoveReplicatedEntity(int networkId) =>
+            _snapshots.Remove(networkId);
 
         // --- Interaction system ---
 

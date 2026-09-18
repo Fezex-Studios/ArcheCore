@@ -169,7 +169,7 @@ namespace ArcheCore.Server.World.Managers
             }
 
             _sessions.RegisterNetworkId(networkId, peer);
-            _snapshots.SetTransform(networkId, spawn, yaw: 0f, isNpc: false, _clock.Current);
+            _snapshots.SetTransform(networkId, spawn, velocity: Vector3.Zero, yaw: 0f, isNpc: false, _clock.Current);
 
             W2CSpawnPlayerPacketSender.Send(_replication, peer, networkId, spawn, true);
 

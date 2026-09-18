@@ -30,6 +30,13 @@ namespace ArcheCore.Server.World.Replication
     /// That split is deliberate: an unreliable packet is allowed to be
     /// dropped, so it must never be the only delivery of state the client
     /// cannot recover from.
+    ///
+    /// ENTRIES ARE NOW VARIABLE LENGTH. An entry is 12 bytes without
+    /// velocity and 15 with it, and which one it is has to be read off the
+    /// flags byte. SnapshotReader on the client does exactly that; if you
+    /// add another optional field, add it to BOTH sides in the same commit
+    /// or the reader will desync mid-packet and misparse every entry after
+    /// the first one that differs.
     /// </summary>
     public struct SnapshotWriter : IDisposable
     {
@@ -37,8 +44,17 @@ namespace ArcheCore.Server.World.Replication
         private const int HeaderSize = 20;
         private const int EntryCountOffset = 18;
 
-        // Worst case per entry: id(4) + flags(1) + pos(6) + yaw(1)
-        private const int MaxEntrySize = 12;
+        // Entry sizes: id(4) + flags(1) + pos(6) + yaw(1) [+ velocity(3)]
+        private const int BaseEntrySize = 12;
+        private const int VelocityBytes = 3;
+
+        /// <summary>
+        /// Worst case, used by IsFull. Reserving the velocity bytes even
+        /// for an entry that may not carry them costs at most 3 bytes of
+        /// unused budget at the tail of the packet, and in exchange IsFull
+        /// never has to know what the next entry will look like.
+        /// </summary>
+        private const int MaxEntrySize = BaseEntrySize + VelocityBytes;
 
         private byte[] _buffer;
         private int _offset;
@@ -94,12 +110,26 @@ namespace ArcheCore.Server.World.Replication
         /// the next one. That is exactly the behavior you want in a crowded
         /// hub - degrade the far-away stuff, never the nearby stuff.
         /// </summary>
-        public bool TryWriteEntity(int networkId, Vector3 position, float yaw, bool isNpc)
+        /// <param name="includeVelocity">
+        /// Only true for near-tier entities. A far-tier entity updates
+        /// every 10th tick; by the time the client would have extrapolated
+        /// anywhere useful the next real update has landed, so the three
+        /// bytes buy nothing and cost ~25% of the entry. This is the reason
+        /// velocity is a flag rather than a fixed field.
+        /// </param>
+        public bool TryWriteEntity(
+            int networkId,
+            Vector3 position,
+            Vector3 velocity,
+            float yaw,
+            bool isNpc,
+            bool includeVelocity)
         {
             if (IsFull) return false;
 
             var flags = EntityStateCodec.EntryFlags.Position | EntityStateCodec.EntryFlags.Yaw;
-            if (isNpc) flags |= EntityStateCodec.EntryFlags.IsNpc;
+            if (isNpc)           flags |= EntityStateCodec.EntryFlags.IsNpc;
+            if (includeVelocity) flags |= EntityStateCodec.EntryFlags.Velocity;
 
             var span = _buffer.AsSpan(_offset);
 
@@ -110,7 +140,17 @@ namespace ArcheCore.Server.World.Replication
             BinaryPrimitives.WriteInt16LittleEndian(span[9..],  EntityStateCodec.Quantize(position.Z, _originZ));
             span[11] = EntityStateCodec.QuantizeYaw(yaw);
 
-            _offset += 12;
+            var written = BaseEntrySize;
+
+            if (includeVelocity)
+            {
+                span[12] = (byte)EntityStateCodec.QuantizeVelocity(velocity.X);
+                span[13] = (byte)EntityStateCodec.QuantizeVelocity(velocity.Y);
+                span[14] = (byte)EntityStateCodec.QuantizeVelocity(velocity.Z);
+                written += VelocityBytes;
+            }
+
+            _offset += written;
             _entryCount++;
             return true;
         }

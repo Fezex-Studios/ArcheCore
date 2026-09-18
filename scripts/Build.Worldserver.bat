@@ -1,0 +1,4 @@
+@echo off
+pushd ..\src\ArcheCore.Server.World
+dotnet build -c Debug
+popd

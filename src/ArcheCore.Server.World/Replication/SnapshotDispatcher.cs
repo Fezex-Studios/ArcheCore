@@ -48,6 +48,16 @@ namespace ArcheCore.Server.World.Replication
     /// existing reliable W2C senders. This packet is unreliable and may be
     /// dropped, so it must only ever carry state the client can miss
     /// without desyncing.
+    ///
+    /// ADDED: velocity, stored alongside position and written only for
+    /// NEAR-TIER entries. The client uses it to extrapolate through a
+    /// dropped or late snapshot instead of freezing the remote character
+    /// until the next one lands. Restricting it to the near tier is the
+    /// whole reason it's affordable: a mid-tier entity updates every 3rd
+    /// tick and a far-tier one every 10th, and at those rates the client
+    /// gets a real position back before extrapolation would have earned
+    /// its three bytes. Near-tier entries are 15 bytes, everything else
+    /// stays at 12.
     /// </summary>
     public sealed class SnapshotDispatcher
     {
@@ -67,10 +77,10 @@ namespace ArcheCore.Server.World.Replication
         /// <summary>
         /// Max entities in one observer's snapshot. 150 is a reasonable
         /// starting point; profile in your densest hub and adjust. Note
-        /// this interacts with the MTU budget - 150 entities x 12 bytes is
-        /// 1800 bytes, over a 1200-byte MTU, so in practice the writer's
-        /// fill limit bites first and the cap is a cheap pre-filter that
-        /// keeps the sort small.
+        /// this interacts with the MTU budget - 150 entities x 12-15 bytes
+        /// is well over a 900-byte budget, so in practice the writer's fill
+        /// limit bites first and the cap is a cheap pre-filter that keeps
+        /// the sort small.
         /// </summary>
         public int MaxEntitiesPerSnapshot = 150;
 
@@ -94,6 +104,7 @@ namespace ArcheCore.Server.World.Replication
         private struct Transform
         {
             public Vector3 Position;
+            public Vector3 Velocity;
             public float   Yaw;
             public uint    LastChangedTick;
             public bool    IsNpc;
@@ -103,9 +114,18 @@ namespace ArcheCore.Server.World.Replication
         {
             public int     NetworkId;
             public Vector3 Position;
+            public Vector3 Velocity;
             public float   Yaw;
             public float   DistanceSq;
             public bool    IsNpc;
+
+            /// <summary>
+            /// The LOD interval this entity landed on for this observer.
+            /// Carried through the sort so the write step knows whether to
+            /// spend velocity bytes on it without recomputing the distance
+            /// tier a second time.
+            /// </summary>
+            public int     Interval;
         }
 
         public SnapshotDispatcher(
@@ -122,11 +142,19 @@ namespace ArcheCore.Server.World.Replication
         /// Call from the movement handler instead of broadcasting. Cheap by
         /// design: one dictionary write, no sends, no allocation.
         /// </summary>
-        public void SetTransform(int networkId, Vector3 position, float yaw, bool isNpc, uint tick)
+        /// <param name="velocity">
+        /// World units per second. Pass Vector3.Zero for anything that
+        /// doesn't report it (spawns, teleports, the NPC wander AI) — a
+        /// zero here is not a missing value, it is a positive statement
+        /// that the entity is stationary, and the client will correctly
+        /// extrapolate it nowhere.
+        /// </param>
+        public void SetTransform(int networkId, Vector3 position, Vector3 velocity, float yaw, bool isNpc, uint tick)
         {
             _transforms[networkId] = new Transform
             {
                 Position        = position,
+                Velocity        = velocity,
                 Yaw             = yaw,
                 LastChangedTick = tick,
                 IsNpc           = isNpc
@@ -197,6 +225,18 @@ namespace ArcheCore.Server.World.Replication
 
                 // Nothing to say about an entity that hasn't moved since
                 // we last would have sent it.
+                //
+                // NOTE this is also what makes the client's "stop packet"
+                // load-bearing. A player who stops moving stops sending,
+                // so this check goes true and the server goes quiet about
+                // them — which is correct and is the point. But it means
+                // the LAST thing an observer heard is whatever the final
+                // update said. If that final update still carried a
+                // non-zero velocity, every observer extrapolates the
+                // character onward past where they actually stopped and
+                // then has nothing to correct it with. The client sends
+                // one zero-velocity packet on the moving->stopped edge for
+                // exactly this reason.
                 if (tick - t.LastChangedTick > (uint)interval)
                     continue;
 
@@ -207,9 +247,11 @@ namespace ArcheCore.Server.World.Replication
                 {
                     NetworkId  = id,
                     Position   = t.Position,
+                    Velocity   = t.Velocity,
                     Yaw        = t.Yaw,
                     DistanceSq = distSq,
-                    IsNpc      = t.IsNpc
+                    IsNpc      = t.IsNpc,
+                    Interval   = interval
                 });
             }
 
@@ -232,7 +274,12 @@ namespace ArcheCore.Server.World.Replication
             for (int i = 0; i < _scratch.Count; i++)
             {
                 var c = _scratch[i];
-                if (!writer.TryWriteEntity(c.NetworkId, c.Position, c.Yaw, c.IsNpc))
+
+                // Velocity only where the client will actually extrapolate
+                // with it. See the class comment.
+                var includeVelocity = c.Interval == NearInterval;
+
+                if (!writer.TryWriteEntity(c.NetworkId, c.Position, c.Velocity, c.Yaw, c.IsNpc, includeVelocity))
                     break; // MTU reached; remainder rides the next tick.
             }
 
