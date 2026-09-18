@@ -11,7 +11,7 @@ popd
 
 @echo off
 pushd ..\src\ArcheCore.Server.Persistence
-bun build src/index.ts --compile --outfile ./bin/ArcheCore.Persistenceserver
+dotnet build -c Debug
 popd
 pause
 
