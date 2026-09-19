@@ -42,6 +42,12 @@ namespace Worldserver.ArcheCore.PersistenceServer.Scripts
                 Timeout     = TimeSpan.FromSeconds(10)
             };
 
+            // Proves to Persistence that this really is the WorldServer.
+            // Set here rather than per-send so a route added later can't
+            // forget it. Must match InternalSecret in the Persistence
+            // server's appsettings.json.
+            _http.DefaultRequestHeaders.Add("x-internal-secret", worldConfig.InternalSecret);
+
             W2PCharacterLoad   = new W2PCharacterLoadSender(this);
             W2PCharacterCreate = new W2PCharacterCreateSender(this);
             W2PCharacterList   = new W2PCharacterListSender(this);
