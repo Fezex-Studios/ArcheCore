@@ -24,6 +24,7 @@ public class WorldServer : IHostedService, INetEventListener
     // Utils
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
     private readonly WorldServerConfig _world;
+    private readonly IHostEnvironment _hostEnvironment;
     private readonly NetworkConfig _network;
     private readonly IServiceScopeFactory _scopeFactory;
     private PacketDispatcher _packetDispatcher;
@@ -57,6 +58,7 @@ public class WorldServer : IHostedService, INetEventListener
 
     public WorldServer(
         IOptions<WorldServerConfig> world,
+        IHostEnvironment hostEnvironment,
         IServiceScopeFactory scopeFactory,
         IOptions<NetworkConfig> network,
         QuestManager questManager,
@@ -69,6 +71,7 @@ public class WorldServer : IHostedService, INetEventListener
         SpawnPointService spawnPoints)
     {
         _world = world.Value;
+        _hostEnvironment = hostEnvironment;
         _network = network.Value;
         _questManager = questManager;
         _itemManager = itemManager;
@@ -83,7 +86,13 @@ public class WorldServer : IHostedService, INetEventListener
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        // 0. Apply EF Core migrations to worldserver.db
+        // 0a. Refuse to start on a config that looks fine but isn't.
+        //     Runs before the migration and long before the socket opens,
+        //     so a misconfigured server never reaches a state where a
+        //     client could connect to it.
+        _world.Validate(_hostEnvironment.IsDevelopment());
+
+        // 0b. Apply EF Core migrations to worldserver.db
         await using var db = await _dbFactory.CreateDbContextAsync();
         await db.Database.MigrateAsync();
 
@@ -237,6 +246,7 @@ public class WorldServer : IHostedService, INetEventListener
         services.Register(_spawnPoints);
         services.Register(_spawnManager);
         services.Register(_itemManager);
+        services.Register(_world);
 
         _packetDispatcher.AutoRegister(services.Resolve, typeof(WorldServer).Assembly);
     }

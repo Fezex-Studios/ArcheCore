@@ -22,6 +22,10 @@ public class C2WAuthenticateHandler : IPacketHandler
         private readonly AuthService authService;
         private readonly PersistenceClient persistence;
 
+        // One instance per handler, and the dispatcher builds handlers once
+        // at registration, so this is effectively per-server state.
+        private readonly AuthThrottle throttle = new();
+
         public C2WAuthenticateHandler(PlayerManager playerManager, AuthService authService, PersistenceClient persistence)
         {
             this.playerManager = playerManager;
@@ -38,12 +42,57 @@ public class C2WAuthenticateHandler : IPacketHandler
                     .Deserialize<C2WAuthenticateRequest>(
                         reader.GetRemainingBytes());
 
-            Logger.Warn($"Auth Token: {request.Token}");
+            // The token is a bearer credential: whoever holds it IS that
+            // account until it expires. It never goes in a log, at any
+            // level. Logs get tailed, shipped, pasted into chat and
+            // attached to bug reports, and every one of those is a session
+            // handover. Log the peer instead - that's the part you
+            // actually need when reading this back.
+            Logger.Debug($"[Auth] Authenticate received from {peer.Address}");
+
+            // Already in world? Re-authenticating a live session is not a
+            // flow that should exist.
+            if (playerManager.TryGetNetworkId(peer, out _))
+            {
+                Logger.Debug($"[Auth] {peer.Address} is already in world - ignored.");
+                return;
+            }
+
+            switch (throttle.TryBegin(peer))
+            {
+                case AuthThrottle.Decision.AlreadyInFlight:
+                    // Silent: an honest client on a laggy link can
+                    // legitimately resend before the first one lands.
+                    return;
+
+                case AuthThrottle.Decision.TooManyAttempts:
+                    Logger.Warn(
+                        $"[Auth] {peer.Address} exceeded the authentication attempt limit - disconnecting.");
+                    peer.Disconnect();
+                    return;
+            }
 
             _ = ValidateAndConnect(peer, request.Token);
         }
 
         private async Task ValidateAndConnect(NetPeer peer, string token)
+        {
+            try
+            {
+                await ValidateAndConnectCore(peer, token);
+            }
+            finally
+            {
+                // However this ended - success, rejection, or a thrown
+                // exception - the in-flight slot has to come back, or the
+                // peer is locked out of retrying for the rest of its
+                // connection. Enqueued because throttle is tick-thread state
+                // and this continuation is not on the tick thread.
+                playerManager.EnqueueAction(() => throttle.Complete(peer));
+            }
+        }
+
+        private async Task ValidateAndConnectCore(NetPeer peer, string token)
         {
             int accountId = await authService.ValidateToken(token);
 

@@ -10,10 +10,60 @@ var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("Persistence")
     ?? throw new InvalidOperationException("Missing 'Persistence' connection string.");
 
+// ── Shared secret with the WorldServer ───────────────────────────────
+// Every route below is privileged: they read and write character rows
+// for arbitrary account ids, with no user-level identity anywhere in the
+// protocol. The WorldServer is trusted to have already validated the
+// player's session before it calls here, which means the ONLY thing
+// standing between an attacker and "create/load/save any character on
+// the shard" is proof that the caller really is the WorldServer.
+//
+// Refuse to start without it. A persistence server that boots with an
+// empty or placeholder secret is worse than one that doesn't boot,
+// because it looks like it's working.
+var internalSecret = builder.Configuration["InternalSecret"];
+
+if (string.IsNullOrWhiteSpace(internalSecret)
+    || internalSecret == "replace_this_with_a_real_secret"
+    || internalSecret.Length < 32)
+{
+    throw new InvalidOperationException(
+        "InternalSecret is missing, still the placeholder, or shorter than 32 chars. " +
+        "Set it in appsettings.json (or the InternalSecret environment variable) to a " +
+        "random value of at least 32 characters, and set the SAME value in the " +
+        "WorldServer's World:InternalSecret. Generate one with: openssl rand -base64 48");
+}
+
+var secretBytes = System.Text.Encoding.UTF8.GetBytes(internalSecret);
+
 builder.Services.AddDbContext<PersistenceDbContext>(options =>
     options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString)));
 
 var app = builder.Build();
+
+// ── Gate EVERY route on the shared secret ────────────────────────────
+// Placed before any MapPost so a route added later is protected by
+// default rather than by remembering to protect it. Fixed-time compare
+// so the failure can't be turned into a byte-at-a-time oracle.
+app.Use(async (context, next) =>
+{
+    var presented = context.Request.Headers["x-internal-secret"].ToString();
+
+    if (presented.Length == 0
+        || !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+               System.Text.Encoding.UTF8.GetBytes(presented), secretBytes))
+    {
+        // 404, not 401: an unauthenticated caller shouldn't be able to
+        // confirm this service exists or enumerate which routes it has.
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        Console.Error.WriteLine(
+            $"[Persistence] Rejected {context.Request.Method} {context.Request.Path} " +
+            $"from {context.Connection.RemoteIpAddress} — bad or missing x-internal-secret.");
+        return;
+    }
+
+    await next();
+});
 
 // ── /connect ─────────────────────────────────────────────────────────
 // Original just logged the message and sent back a fixed confirmation.
@@ -200,20 +250,38 @@ app.MapPost("/characters/save", async (HttpContext context, PersistenceDbContext
 
     try
     {
-        await db.Database.ExecuteSqlInterpolatedAsync($"""
-            INSERT INTO characters
-                (character_id, account_id, name, level, pos_x, pos_y, pos_z)
-            VALUES
-                ({request.CharacterId}, {request.AccountId}, {request.Name},
-                 {request.Level}, {request.X}, {request.Y}, {request.Z})
-            ON DUPLICATE KEY UPDATE
-                account_id = VALUES(account_id),
-                name       = VALUES(name),
-                level      = VALUES(level),
-                pos_x      = VALUES(pos_x),
-                pos_y      = VALUES(pos_y),
-                pos_z      = VALUES(pos_z)
+        // UPDATE, not upsert, and scoped to the owning account.
+        //
+        // The previous version was INSERT ... ON DUPLICATE KEY UPDATE with
+        // `account_id = VALUES(account_id)` in the update list, which meant
+        // a save could REASSIGN a character to a different account. Rows
+        // are only ever created by /characters/create, so the insert half
+        // was never needed — and `WHERE account_id` turns a mismatched
+        // AccountId from a bug (silent ownership transfer) into a visible
+        // zero-row result.
+        var rows = await db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE characters
+               SET name  = {request.Name},
+                   level = {request.Level},
+                   pos_x = {request.X},
+                   pos_y = {request.Y},
+                   pos_z = {request.Z}
+             WHERE character_id = {request.CharacterId}
+               AND account_id   = {request.AccountId}
             """);
+
+        if (rows == 0)
+        {
+            // Either the character doesn't exist or it belongs to someone
+            // else. Both are bugs upstream, and both used to be papered
+            // over — the first by silently inserting a row, the second by
+            // silently stealing one.
+            Console.Error.WriteLine(
+                $"[Persistence] Save affected 0 rows: CharacterId={request.CharacterId} " +
+                $"is missing or not owned by AccountId={request.AccountId}.");
+            context.Response.StatusCode = StatusCodes.Status409Conflict;
+            return;
+        }
 
         Console.WriteLine($"Saved {request.Name}");
     }
