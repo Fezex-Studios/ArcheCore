@@ -30,6 +30,15 @@ namespace ArcheCore.Server.World.Managers
     /// because a player with mouse-look held faces the camera, not the way
     /// they're moving, and a player turning on the spot has a facing that
     /// changes while velocity stays zero.
+    ///
+    /// CHANGED AGAIN: pitch, roll and a movement-state byte ride along on
+    /// the same path. None of it is simulated here either; state is what
+    /// observing clients pick an animation from, and pitch/roll are for
+    /// anything whose body isn't upright. Note this method is only reached
+    /// for positions MovementValidator already accepted - the handler drops
+    /// rejected ones before they get here, so nothing downstream (the
+    /// interest grid, the transform store, the session's saved position)
+    /// ever sees a position the server didn't believe.
     /// </summary>
     public class PlayerMovementBroadcaster
     {
@@ -77,12 +86,18 @@ namespace ArcheCore.Server.World.Managers
         /// C2WMovementHandler about where real validation belongs.
         /// </param>
         /// <param name="yaw">Facing, in radians.</param>
+        /// <param name="pitch">Nose up/down, radians. Zero for an upright character.</param>
+        /// <param name="roll">Bank, radians. Zero for an upright character.</param>
+        /// <param name="state">MovementState bitfield - what the character is doing.</param>
         public void BroadcastPosition(
             NetPeer sender,
             int networkId,
             Vector3 position,
             Vector3 velocity = default,
-            float yaw = 0f)
+            float yaw = 0f,
+            float pitch = 0f,
+            float roll = 0f,
+            byte state = 0)
         {
             if (sender.Tag is PlayerSession senderSession)
                 senderSession.Position = position;
@@ -129,7 +144,10 @@ namespace ArcheCore.Server.World.Managers
             // happens here - just a dictionary write. SnapshotDispatcher
             // picks this up on the next Flush(tick) and decides who
             // actually needs to hear about it, at what rate, per observer.
-            _snapshots.SetTransform(networkId, position, velocity, yaw, isNpc: false, _clock.Current);
+            _snapshots.SetTransform(
+                networkId, position, velocity,
+                yaw, pitch, roll, state,
+                isNpc: false, _clock.Current);
         }
     }
 }

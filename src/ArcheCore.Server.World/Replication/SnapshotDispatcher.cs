@@ -106,6 +106,9 @@ namespace ArcheCore.Server.World.Replication
             public Vector3 Position;
             public Vector3 Velocity;
             public float   Yaw;
+            public float   Pitch;
+            public float   Roll;
+            public byte    State;
             public uint    LastChangedTick;
             public bool    IsNpc;
         }
@@ -116,6 +119,9 @@ namespace ArcheCore.Server.World.Replication
             public Vector3 Position;
             public Vector3 Velocity;
             public float   Yaw;
+            public float   Pitch;
+            public float   Roll;
+            public byte    State;
             public float   DistanceSq;
             public bool    IsNpc;
 
@@ -149,13 +155,25 @@ namespace ArcheCore.Server.World.Replication
         /// that the entity is stationary, and the client will correctly
         /// extrapolate it nowhere.
         /// </param>
-        public void SetTransform(int networkId, Vector3 position, Vector3 velocity, float yaw, bool isNpc, uint tick)
+        public void SetTransform(
+            int networkId,
+            Vector3 position,
+            Vector3 velocity,
+            float yaw,
+            float pitch,
+            float roll,
+            byte state,
+            bool isNpc,
+            uint tick)
         {
             _transforms[networkId] = new Transform
             {
                 Position        = position,
                 Velocity        = velocity,
                 Yaw             = yaw,
+                Pitch           = pitch,
+                Roll            = roll,
+                State           = state,
                 LastChangedTick = tick,
                 IsNpc           = isNpc
             };
@@ -249,6 +267,9 @@ namespace ArcheCore.Server.World.Replication
                     Position   = t.Position,
                     Velocity   = t.Velocity,
                     Yaw        = t.Yaw,
+                    Pitch      = t.Pitch,
+                    Roll       = t.Roll,
+                    State      = t.State,
                     DistanceSq = distSq,
                     IsNpc      = t.IsNpc,
                     Interval   = interval
@@ -279,7 +300,10 @@ namespace ArcheCore.Server.World.Replication
                 // with it. See the class comment.
                 var includeVelocity = c.Interval == NearInterval;
 
-                if (!writer.TryWriteEntity(c.NetworkId, c.Position, c.Velocity, c.Yaw, c.IsNpc, includeVelocity))
+                if (!writer.TryWriteEntity(
+                        c.NetworkId, c.Position, c.Velocity,
+                        c.Yaw, c.Pitch, c.Roll, c.State,
+                        c.IsNpc, includeVelocity))
                     break; // MTU reached; remainder rides the next tick.
             }
 

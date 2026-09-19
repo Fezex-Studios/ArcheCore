@@ -77,9 +77,6 @@
         <None Update="SQL\**\*">
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
-        <None Update="SQL\patches\readme.md">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
         <None Update="worldserver.db">
           <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>

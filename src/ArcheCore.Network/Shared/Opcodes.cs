@@ -31,6 +31,7 @@
         LevelUp = 28,   // NEW
         PlayerSpawned = 29,
         W2CWorldSnapshot = 30, // W2C: batched, quantized per-tick movement snapshot (unreliable) — see SnapshotDispatcher/SnapshotWriter
-        
+        W2CPositionCorrection = 31, // W2C: reliable snap-back after MovementValidator rejects a client's reported position
+
     }
 }

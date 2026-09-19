@@ -37,6 +37,45 @@ namespace ArcheCore.Server.World.Managers
         public Vector3  SavedPosition;
         public int      SavedLevel;
 
+        // --- Movement validation (see MovementValidator) ---
+        //
+        // Deliberately here rather than in a dictionary inside the
+        // validator. This object's lifetime is already the connection's
+        // lifetime and is already cleaned up on disconnect, so hanging the
+        // per-player state off it means there is no second thing to
+        // remember to prune - which is exactly the leak that had to be
+        // fixed in SnapshotDispatcher when NPCs moved onto it.
+
+        /// <summary>
+        /// False until the first movement packet or an authoritative move
+        /// seeds a baseline. Until then there is nothing to measure a
+        /// reported position against.
+        /// </summary>
+        public bool     MoveBaselineSet;
+
+        /// <summary>
+        /// Last position the server actually believed. This is what a
+        /// correction snaps the client back to, so it must never be
+        /// assigned from a rejected packet.
+        /// </summary>
+        public Vector3  LastValidPosition;
+
+        /// <summary>Monotonic seconds (MovementValidator.Now), not DateTime.</summary>
+        public double   LastMoveTime;
+
+        // Banked movement allowance, in world units. Refills at the legal
+        // speed and is spent by distance moved - see MovementValidator for
+        // why it's a bank and not an instantaneous rate check.
+        public float    HorizontalBudget;
+        public float    UpBudget;
+        public float    DownBudget;
+
+        /// <summary>Consecutive-ish rejections; decays on accepted packets.</summary>
+        public int      MovementViolations;
+
+        /// <summary>Monotonic seconds of the last snap-back sent to this client.</summary>
+        public double   LastCorrectionTime;
+
         /// <summary>Moved more than 10cm or changed level since the last save.</summary>
         public bool IsDirty =>
             !HasBeenSaved ||
