@@ -26,4 +26,50 @@ public class WorldServerConfig
     /// load-test run — this is a full auth bypass.
     /// </summary>
     public bool AllowLoadTestBypass { get; set; } = false;
+
+    /// <summary>
+    /// DEV ONLY. Enables client-driven debug opcodes that grant state the
+    /// server has no way to verify - currently just C2W LevelUp. Never
+    /// true on anything players can reach.
+    /// </summary>
+    public bool AllowDebugCommands { get; set; } = false;
+
+    /// <summary>
+    /// Called once at boot, before the socket opens. Every check here is
+    /// something that silently produces a working-looking server with no
+    /// security: a default secret that an attacker already knows, or a
+    /// bypass flag left on after a load test. A config mistake that costs
+    /// you the shard should cost you a failed startup instead, loudly,
+    /// while you are watching.
+    /// </summary>
+    public void Validate(bool isDevelopment)
+    {
+        const string Placeholder = "replace_this_with_a_real_secret";
+
+        if (string.IsNullOrWhiteSpace(InternalSecret)
+            || InternalSecret == Placeholder
+            || InternalSecret.Length < 32)
+        {
+            throw new InvalidOperationException(
+                "World:InternalSecret is missing, still the placeholder, or shorter than " +
+                "32 characters. It authenticates this server to BOTH the AuthServer and " +
+                "the Persistence server, so all three must carry the same value. " +
+                "Generate one with: openssl rand -base64 48");
+        }
+
+        if (AllowLoadTestBypass && !isDevelopment)
+        {
+            throw new InvalidOperationException(
+                "World:AllowLoadTestBypass is true outside the Development environment. " +
+                "This is a complete authentication bypass - any client can present " +
+                "\"loadtest:N\" and be account 900000+N. Set it to false.");
+        }
+
+        if (AllowDebugCommands && !isDevelopment)
+        {
+            throw new InvalidOperationException(
+                "World:AllowDebugCommands is true outside the Development environment. " +
+                "Set it to false.");
+        }
+    }
 }
