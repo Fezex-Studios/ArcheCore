@@ -1,0 +1,35 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <!--
+      DELIBERATELY netstandard2.1 AND DELIBERATELY NO UNITY REFERENCE.
+  
+      This project is compiled into the world server AND dropped into Unity as
+      a managed DLL (or symlinked as source). The absence of a UnityEngine
+      reference is the load-bearing part: it is what forces every engine
+      dependency out through ICollisionWorld instead of quietly creeping in,
+      and it is why the same movement code can run inside a headless server
+      that has no PhysX, no GameObjects and no frame loop.
+  
+      netstandard2.1 rather than a modern net version because that is what
+      Unity's runtime accepts for a plain managed assembly. Keep it that way
+      even though the server targets net10.0 - the server can consume
+      netstandard2.1 fine, and the reverse is not true.
+    -->
+
+    <PropertyGroup>
+        <TargetFramework>netstandard2.1</TargetFramework>
+        <LangVersion>latest</LangVersion>
+        <Nullable>disable</Nullable>
+        <AssemblyName>ArcheCore.Movement</AssemblyName>
+        <RootNamespace>ArcheCore.Movement</RootNamespace>
+    </PropertyGroup>
+
+    <!--
+      No PackageReference for System.Numerics.Vectors. Vector3 and Quaternion
+      are part of netstandard2.1 itself, so the package is redundant here -
+      and adding it would mean a second DLL to copy into Assets/Plugins
+      alongside this one, for nothing. It is only needed when targeting
+      netstandard2.0 or .NET Framework.
+    -->
+
+</Project>

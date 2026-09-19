@@ -1,1 +1,0 @@
-INSERT INTO "NpcTemplates" (Name, Level, ModelType,InteractRange) VALUES ('Orc Grunt', 5, 'NPC_Orc',4.0);

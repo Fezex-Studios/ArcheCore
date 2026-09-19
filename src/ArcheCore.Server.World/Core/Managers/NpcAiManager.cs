@@ -2,6 +2,7 @@
 using System.Collections.Concurrent;
 using System.Numerics;
 using ArcheCore.Server.World.Core.Entities;
+using ArcheCore.Network.Shared;
 using ArcheCore.Server.World.Networking.W2C;
 using LiteNetLib;
 using NLog;
@@ -256,13 +257,20 @@ namespace ArcheCore.Server.World.Managers
             // motion to work from.
             var yaw = MathF.Atan2(direction.X, direction.Z);
 
+            // NPCs are always on the ground and never jump, so the only
+            // bit that applies is Moving - and it's off on the arriving
+            // step, matching the zero velocity, so an observer plays the
+            // idle animation during the pause at each waypoint instead of
+            // a run cycle on the spot.
+            var moveState = arriving ? MovementState.None : MovementState.Moving;
+
             int id = state.NetworkId;
-            _playerManager.EnqueueAction(() => ApplyMove(id, newPos, velocity, yaw));
+            _playerManager.EnqueueAction(() => ApplyMove(id, newPos, velocity, yaw, (byte)moveState));
         }
 
         // Main thread only (enqueued). Mirrors PlayerMovementBroadcaster.BroadcastPosition,
         // but for an NPC - no sender peer, and only players in entered/left get packets.
-        private void ApplyMove(int networkId, Vector3 newPosition, Vector3 velocity, float yaw)
+        private void ApplyMove(int networkId, Vector3 newPosition, Vector3 velocity, float yaw, byte state)
         {
             if (!_spawnManager.TryGetNpc(networkId, out var npc))
                 return; // despawned since this move was queued - drop it
@@ -291,7 +299,7 @@ namespace ArcheCore.Server.World.Managers
             // what rate. Enter/leave above stay immediate and reliable,
             // because a spawn or despawn is exactly the kind of event an
             // unreliable snapshot must never be the only delivery of.
-            _playerManager.SetNpcTransform(networkId, newPosition, velocity, yaw);
+            _playerManager.SetNpcTransform(networkId, newPosition, velocity, yaw, state);
         }
 
         private void BroadcastSpawnToNearbyPlayers(NpcEntity npc)
@@ -307,7 +315,9 @@ namespace ArcheCore.Server.World.Managers
             // which for a freshly activated spawner is up to 300ms of the
             // NPC existing on the client at its spawn packet's position
             // with nothing confirming it.
-            _playerManager.SetNpcTransform(npc.NetworkId, npc.Position, Vector3.Zero, yaw: 0f);
+            _playerManager.SetNpcTransform(
+                npc.NetworkId, npc.Position, Vector3.Zero,
+                yaw: 0f, state: (byte)MovementState.None);
 
             foreach (var otherId in entered)
             {

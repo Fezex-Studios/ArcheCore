@@ -44,17 +44,28 @@ namespace ArcheCore.Server.World.Replication
         private const int HeaderSize = 20;
         private const int EntryCountOffset = 18;
 
-        // Entry sizes: id(4) + flags(1) + pos(6) + yaw(1) [+ velocity(3)]
-        private const int BaseEntrySize = 12;
+        // Entry sizes: id(4) + flags(1) + pos(6) + yaw(1) + state(1)
+        //              [+ velocity(3)] [+ tilt(2)]
+        private const int BaseEntrySize = 13;
         private const int VelocityBytes = 3;
+        private const int TiltBytes = 2;
 
         /// <summary>
-        /// Worst case, used by IsFull. Reserving the velocity bytes even
-        /// for an entry that may not carry them costs at most 3 bytes of
-        /// unused budget at the tail of the packet, and in exchange IsFull
-        /// never has to know what the next entry will look like.
+        /// Worst case, used by IsFull. Reserving the optional bytes even
+        /// for an entry that won't carry them wastes at most 5 bytes of
+        /// budget at the tail of the packet, and in exchange IsFull never
+        /// has to know what the next entry will look like.
+        ///
+        /// Note what this does to the entity count: an 18-byte worst case
+        /// against a 900-byte budget is ~50 entities per datagram, down
+        /// from 75 when entries were a flat 12. The state byte is the part
+        /// that isn't optional and can't be - see MovementState on why it
+        /// can't be change-gated - so that cost is unavoidable if remote
+        /// characters are ever to be animated. If 50 turns out to be too
+        /// tight in a dense hub, raise mtuBudget toward LiteNetLib's 1023
+        /// ceiling before touching the format.
         /// </summary>
-        private const int MaxEntrySize = BaseEntrySize + VelocityBytes;
+        private const int MaxEntrySize = BaseEntrySize + VelocityBytes + TiltBytes;
 
         private byte[] _buffer;
         private int _offset;
@@ -122,14 +133,26 @@ namespace ArcheCore.Server.World.Replication
             Vector3 position,
             Vector3 velocity,
             float yaw,
+            float pitch,
+            float roll,
+            byte state,
             bool isNpc,
             bool includeVelocity)
         {
             if (IsFull) return false;
 
+            // Tilt is decided here rather than by the caller: it's a
+            // property of the entity's own rotation, not of the observer's
+            // distance the way velocity is, so there's nothing for the
+            // dispatcher to weigh.
+            var includeTilt =
+                MathF.Abs(pitch) > EntityStateCodec.TiltEpsilon ||
+                MathF.Abs(roll)  > EntityStateCodec.TiltEpsilon;
+
             var flags = EntityStateCodec.EntryFlags.Position | EntityStateCodec.EntryFlags.Yaw;
             if (isNpc)           flags |= EntityStateCodec.EntryFlags.IsNpc;
             if (includeVelocity) flags |= EntityStateCodec.EntryFlags.Velocity;
+            if (includeTilt)     flags |= EntityStateCodec.EntryFlags.Tilt;
 
             var span = _buffer.AsSpan(_offset);
 
@@ -139,15 +162,23 @@ namespace ArcheCore.Server.World.Replication
             BinaryPrimitives.WriteInt16LittleEndian(span[7..],  EntityStateCodec.Quantize(position.Y, _originY));
             BinaryPrimitives.WriteInt16LittleEndian(span[9..],  EntityStateCodec.Quantize(position.Z, _originZ));
             span[11] = EntityStateCodec.QuantizeYaw(yaw);
+            span[12] = state;
 
             var written = BaseEntrySize;
 
             if (includeVelocity)
             {
-                span[12] = (byte)EntityStateCodec.QuantizeVelocity(velocity.X);
-                span[13] = (byte)EntityStateCodec.QuantizeVelocity(velocity.Y);
-                span[14] = (byte)EntityStateCodec.QuantizeVelocity(velocity.Z);
+                span[written]     = (byte)EntityStateCodec.QuantizeVelocity(velocity.X);
+                span[written + 1] = (byte)EntityStateCodec.QuantizeVelocity(velocity.Y);
+                span[written + 2] = (byte)EntityStateCodec.QuantizeVelocity(velocity.Z);
                 written += VelocityBytes;
+            }
+
+            if (includeTilt)
+            {
+                span[written]     = EntityStateCodec.QuantizeYaw(pitch);
+                span[written + 1] = EntityStateCodec.QuantizeYaw(roll);
+                written += TiltBytes;
             }
 
             _offset += written;

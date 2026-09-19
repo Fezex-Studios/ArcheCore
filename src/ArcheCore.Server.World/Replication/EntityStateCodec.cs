@@ -74,14 +74,34 @@ namespace ArcheCore.Server.World.Replication
             IsNpc    = 1 << 2,
 
             /// <summary>
-            /// Entry carries three velocity bytes after the yaw byte. Set
+            /// Entry carries three velocity bytes after the state byte. Set
             /// only for near-tier entities; the reader must branch on this
             /// rather than assuming a fixed entry size, or it will walk off
             /// into the next entry.
             /// </summary>
             Velocity = 1 << 3,
-            // Reserved for later: state/anim id, dead flag.
+
+            /// <summary>
+            /// Entry carries two extra rotation bytes (pitch, roll) after
+            /// the velocity block. Set only when the entity is actually
+            /// tilted - a character standing upright on flat ground has
+            /// pitch and roll of zero and pays nothing for the fact that
+            /// gliders exist. Same reasoning as Velocity: optional fields
+            /// keep the common entry small, at the cost of the reader
+            /// having to derive entry length from the flags rather than a
+            /// constant.
+            /// </summary>
+            Tilt = 1 << 4,
         }
+
+        /// <summary>
+        /// Below this, in radians, an entity counts as upright and the two
+        /// tilt bytes are skipped. ~2 degrees - under the 1.4 degree
+        /// quantization bucket's own noise floor by enough that skipping is
+        /// never visible, and it means ordinary ground characters (which
+        /// have exactly zero pitch and roll) never trip it.
+        /// </summary>
+        public const float TiltEpsilon = 0.035f;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static short Quantize(float value, int origin)

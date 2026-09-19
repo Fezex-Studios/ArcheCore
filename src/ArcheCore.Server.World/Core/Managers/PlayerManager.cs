@@ -29,6 +29,7 @@ namespace ArcheCore.Server.World.Managers
         private readonly AutosaveScheduler _autosave;
         private readonly SnapshotDispatcher _snapshots;
         private readonly TickClock _clock;
+        private readonly MovementValidator _validator;
 
         public InterestManager Interest => _interest;
 
@@ -59,6 +60,11 @@ namespace ArcheCore.Server.World.Managers
             // now NpcAiManager via SetNpcTransform/RemoveReplicatedEntity.
             _snapshots = new SnapshotDispatcher(
                 _sessions, _interest, (ushort)ArcheCore.Library.Net.Worldserver.Opcodes.W2CWorldSnapshot);
+
+            // Owns the validator so C2WMovementHandler doesn't need a
+            // ReplicationManager of its own just to send a correction -
+            // which would mean touching the handler's DI registration.
+            _validator = new MovementValidator(_replication);
 
             _movement = new PlayerMovementBroadcaster(
                 _sessions, _interest, _replication, spawnManager, _snapshots, _clock);
@@ -187,8 +193,28 @@ namespace ArcheCore.Server.World.Managers
         /// </param>
         public void BroadcastPosition(
             NetPeer sender, int networkId, Vector3 position,
-            Vector3 velocity = default, float yaw = 0f) =>
-            _movement.BroadcastPosition(sender, networkId, position, velocity, yaw);
+            Vector3 velocity = default, float yaw = 0f,
+            float pitch = 0f, float roll = 0f, byte state = 0) =>
+            _movement.BroadcastPosition(sender, networkId, position, velocity, yaw, pitch, roll, state);
+
+        /// <summary>
+        /// Gate in front of BroadcastPosition. Returns false when the
+        /// reported position wasn't believed, in which case the caller must
+        /// NOT broadcast it - a rejected position that still reaches the
+        /// interest grid and the transform store defeats the whole point of
+        /// rejecting it.
+        /// </summary>
+        public bool TryAcceptMovement(NetPeer peer, PlayerSession session, Vector3 position, Vector3 velocity) =>
+            _validator.Validate(peer, session, position, velocity) == MovementValidator.Result.Accepted;
+
+        /// <summary>
+        /// Tell the validator the SERVER moved this character. Must be
+        /// called for teleports, respawns and displacement skills, or the
+        /// client's next honest report reads as a teleport and gets snapped
+        /// back - undoing the server's own move.
+        /// </summary>
+        public void NotifyAuthoritativeMove(PlayerSession session, Vector3 position) =>
+            _validator.NotifyAuthoritativeMove(session, position);
 
         // --- Replication surface for non-player entities ---
         //
@@ -203,8 +229,13 @@ namespace ArcheCore.Server.World.Managers
         /// design - one dictionary write, no sends.
         /// </summary>
         /// <param name="yaw">Facing, in radians.</param>
-        public void SetNpcTransform(int networkId, Vector3 position, Vector3 velocity, float yaw) =>
-            _snapshots.SetTransform(networkId, position, velocity, yaw, isNpc: true, _clock.Current);
+        public void SetNpcTransform(
+            int networkId, Vector3 position, Vector3 velocity,
+            float yaw, byte state) =>
+            _snapshots.SetTransform(
+                networkId, position, velocity,
+                yaw, pitch: 0f, roll: 0f, state,
+                isNpc: true, _clock.Current);
 
         /// <summary>
         /// Drop an entity from the transform store. MUST be called when any
