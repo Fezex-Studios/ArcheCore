@@ -22,7 +22,8 @@ namespace ArcheCore.Server.World.PersistenceServer.Senders
             int    level,
             float  x,
             float  y,
-            float  z)
+            float  z,
+            int    gold)
             => _client.PostForStatusAsync(
                 "/characters/save",
                 new W2PCharacterSaveRequest
@@ -33,7 +34,8 @@ namespace ArcheCore.Server.World.PersistenceServer.Senders
                     Level       = level,
                     X           = x,
                     Y           = y,
-                    Z           = z
+                    Z           = z,
+                    Gold        = gold
                 });
     }
 }

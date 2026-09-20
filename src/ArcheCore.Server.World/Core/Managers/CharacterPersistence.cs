@@ -37,16 +37,18 @@ namespace ArcheCore.Server.World.Managers
             string name      = session.Name;
             int level        = session.Level;
             var pos          = session.Position;
+            int gold         = session.Gold;
 
             session.MarkSaved();
 
-            _ = SaveAndReportAsync(session, characterId, accountId, name, level, pos);
+            _ = SaveAndReportAsync(session, characterId, accountId, name, level, pos, gold);
         }
 
         private async Task SaveAndReportAsync(
-            PlayerSession session, long characterId, int accountId, string name, int level, System.Numerics.Vector3 pos)
+            PlayerSession session, long characterId, int accountId, string name,
+            int level, System.Numerics.Vector3 pos, int gold)
         {
-            bool ok = await SaveAsync(characterId, accountId, name, level, pos);
+            bool ok = await SaveAsync(characterId, accountId, name, level, pos, gold);
             if (!ok)
             {
                 // Back on the tick thread: force the next autosave to retry.
@@ -56,12 +58,13 @@ namespace ArcheCore.Server.World.Managers
 
         /// <summary>Safe from any thread. Never throws. Returns true on a confirmed save.</summary>
         public async Task<bool> SaveAsync(
-            long characterId, int accountId, string name, int level, System.Numerics.Vector3 pos)
+            long characterId, int accountId, string name, int level,
+            System.Numerics.Vector3 pos, int gold)
         {
             try
             {
                 bool ok = await _persistence.W2PCharacterSave.Send(
-                    characterId, accountId, name, level, pos.X, pos.Y, pos.Z);
+                    characterId, accountId, name, level, pos.X, pos.Y, pos.Z, gold);
 
                 if (ok)
                     Logger.Debug($"[Save] CharacterId={characterId} saved.");

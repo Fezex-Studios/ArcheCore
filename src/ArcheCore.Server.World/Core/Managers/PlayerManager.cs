@@ -7,6 +7,7 @@ using ArcheCore.Network.Shared.Packets.PersistenceServer.P2W;
 using ArcheCore.Server.World.Core.Interaction;
 using ArcheCore.Server.World.Lua.Scripting;
 using ArcheCore.Server.World.Lua.Scripting.Bindings;
+using ArcheCore.Server.World.Networking.W2C;
 using ArcheCore.Server.World.Replication;
 using ArcheCore.Server.World.Utils.Config;
 using LiteNetLib;
@@ -38,26 +39,12 @@ namespace ArcheCore.Server.World.Managers
         /// Exposed so WorldServer can hand it to the packet dispatcher's
         /// service container - C2WMovementHandler takes it as a constructor
         /// parameter.
-        ///
-        /// Built in here rather than registered in ServerBootStrap because
-        /// it needs SessionManager and TickClock, and both of those are
-        /// created with `new` in this constructor rather than coming from
-        /// DI. Registering it in DI would mean it couldn't be resolved.
         /// </summary>
         public JumpEventBroadcaster Jumps => _jumps;
 
         /// <summary>
         /// Exposed so WorldServer can call ConfigureFromInterest on it at
-        /// startup.
-        ///
-        /// The snapshot LOD tier boundaries and InterestManager's
-        /// spawn/despawn radii describe the same thing - how far away an
-        /// entity is - from two directions, and they used to be independent
-        /// constants in two files. They drifted: MidRange sat at 80 while
-        /// DespawnRadius was 85, so entities in the 80-85 hysteresis band
-        /// were still being rendered while falling into the slowest
-        /// replication tier. Deriving one from the other makes that class
-        /// of mistake impossible rather than merely unlikely.
+        /// startup - see the class comment on SnapshotDispatcher.
         /// </summary>
         public SnapshotDispatcher Snapshots => _snapshots;
 
@@ -83,20 +70,11 @@ namespace ArcheCore.Server.World.Managers
                 _sessions, _persistence, worldConfig.AutosaveIntervalSeconds, worldConfig.TickRate);
             _clock = new TickClock();
 
-            // One dispatcher, shared by movement (writes transforms), spawn
-            // (writes the initial transform + removes on disconnect), and
-            // now NpcAiManager via SetNpcTransform/RemoveReplicatedEntity.
             _snapshots = new SnapshotDispatcher(
                 _sessions, _interest, (ushort)ArcheCore.Library.Net.Worldserver.Opcodes.W2CWorldSnapshot);
 
-            // Owns the validator so C2WMovementHandler doesn't need a
-            // ReplicationManager of its own just to send a correction -
-            // which would mean touching the handler's DI registration.
             _validator = new MovementValidator(_replication);
 
-            // Turns the rising edge of MovementState.Jumping into one
-            // reliable W2CJumpEvent per observer. Must be constructed after
-            // _sessions and _clock, which it depends on.
             _jumps = new JumpEventBroadcaster(_sessions, _interest, _replication, _clock);
 
             _movement = new PlayerMovementBroadcaster(
@@ -129,13 +107,10 @@ namespace ArcheCore.Server.World.Managers
 
         // --- Tick hooks (called by WorldServer.RunTickLoopAsync) ---
 
-        /// <summary>Before PollEvents: sets "now" for SetTransform calls made mid-tick.</summary>
         public void AdvanceTick(uint tick) => _clock.Advance(tick);
 
-        /// <summary>After PollEvents: the only place position packets leave the server.</summary>
         public void FlushSnapshots(uint tick) => _snapshots.Flush(tick);
 
-        /// <summary>Once per tick: saves this tick's slice of dirty characters.</summary>
         public void RunAutosave(uint tick) => _autosave.Tick(tick);
 
         /// <summary>
@@ -152,7 +127,8 @@ namespace ArcheCore.Server.World.Managers
                 if (peer.Tag is not PlayerSession { NetworkId: not null } s || !s.IsDirty)
                     continue;
 
-                saves.Add(_persistence.SaveAsync(s.CharacterId, s.AccountId, s.Name, s.Level, s.Position));
+                saves.Add(_persistence.SaveAsync(
+                    s.CharacterId, s.AccountId, s.Name, s.Level, s.Position, s.Gold));
                 s.MarkSaved();
             }
 
@@ -193,7 +169,6 @@ namespace ArcheCore.Server.World.Managers
         public int? GetPendingAccountId(NetPeer peer) =>
             _sessions.GetPendingAccountId(peer);
 
-        /// <summary>See SessionManager.TryBeginSpawn - one select/create per peer.</summary>
         public bool TryBeginSpawn(NetPeer peer) =>
             _sessions.TryBeginSpawn(peer);
 
@@ -219,49 +194,20 @@ namespace ArcheCore.Server.World.Managers
         public bool TryGetPosition(int networkId, out Vector3 position) =>
             _movement.TryGetPosition(networkId, out position);
 
-        /// <param name="velocity">
-        /// World units/second, client-reported. Note the parameter ORDER:
-        /// velocity comes before yaw. Both are presentation state for other
-        /// clients and neither feeds simulation.
-        /// </param>
         public void BroadcastPosition(
             NetPeer sender, int networkId, Vector3 position,
             Vector3 velocity = default, float yaw = 0f,
             float pitch = 0f, float roll = 0f, byte state = 0) =>
             _movement.BroadcastPosition(sender, networkId, position, velocity, yaw, pitch, roll, state);
 
-        /// <summary>
-        /// Gate in front of BroadcastPosition. Returns false when the
-        /// reported position wasn't believed, in which case the caller must
-        /// NOT broadcast it - a rejected position that still reaches the
-        /// interest grid and the transform store defeats the whole point of
-        /// rejecting it.
-        /// </summary>
         public bool TryAcceptMovement(NetPeer peer, PlayerSession session, Vector3 position, Vector3 velocity) =>
             _validator.Validate(peer, session, position, velocity) == MovementValidator.Result.Accepted;
 
-        /// <summary>
-        /// Tell the validator the SERVER moved this character. Must be
-        /// called for teleports, respawns and displacement skills, or the
-        /// client's next honest report reads as a teleport and gets snapped
-        /// back - undoing the server's own move.
-        /// </summary>
         public void NotifyAuthoritativeMove(PlayerSession session, Vector3 position) =>
             _validator.NotifyAuthoritativeMove(session, position);
 
         // --- Replication surface for non-player entities ---
-        //
-        // NpcAiManager needs to write into the same transform store players
-        // use, but SnapshotDispatcher and TickClock are both constructed and
-        // owned here. These two methods are the whole surface rather than
-        // exposing the dispatcher, so "what tick is it" stays a detail of
-        // this class and callers can't accidentally write a stale timestamp.
 
-        /// <summary>
-        /// Record an NPC's transform for the next snapshot flush. Cheap by
-        /// design - one dictionary write, no sends.
-        /// </summary>
-        /// <param name="yaw">Facing, in radians.</param>
         public void SetNpcTransform(
             int networkId, Vector3 position, Vector3 velocity,
             float yaw, byte state) =>
@@ -270,19 +216,6 @@ namespace ArcheCore.Server.World.Managers
                 yaw, pitch: 0f, roll: 0f, state,
                 isNpc: true, _clock.Current);
 
-        /// <summary>
-        /// Drop an entity from the transform store. MUST be called when any
-        /// replicated entity despawns - the store has no other pruning, so a
-        /// missed call is a permanent leak, and for NPCs (whose spawners
-        /// cycle continuously as players move) an unbounded one.
-        ///
-        /// The jump broadcaster is pruned here for the same reason, plus a
-        /// second one: it keeps the last state byte per entity to detect
-        /// the rising edge of a jump, and LiteNetLib recycles network ids.
-        /// A recycled id that inherited a stale Jumping bit would have its
-        /// first real jump swallowed, because the edge would look like it
-        /// had already happened.
-        /// </summary>
         public void RemoveReplicatedEntity(int networkId)
         {
             _snapshots.Remove(networkId);
@@ -315,6 +248,45 @@ namespace ArcheCore.Server.World.Managers
 
             _persistence.SaveInBackground(session);
             return session.Level;
+        }
+
+        // --- Currency ---
+
+        /// <summary>
+        /// The ONLY place gold changes. Every system that grants or spends
+        /// gold - shop, quest reward, loot sale, this debug command -
+        /// calls this and nothing else touches session.Gold directly.
+        ///
+        /// Refuses to go negative rather than clamping to zero, because a
+        /// caller asking to remove more gold than the player has is a bug
+        /// upstream (a shop that let a purchase through it shouldn't
+        /// have), and silently clamping would hide that bug behind a
+        /// balance that's merely wrong instead of a failed transaction
+        /// that's visibly wrong. Callers must check the return value and
+        /// not apply whatever the gold was "for" when it comes back false.
+        /// </summary>
+        /// <param name="delta">Positive to add, negative to spend.</param>
+        /// <returns>False if delta was negative and would have taken the
+        /// balance below zero. The balance is unchanged in that case.</returns>
+        public bool TryAddGold(NetPeer peer, int delta)
+        {
+            if (!TryGetSession(peer, out var session) || session.NetworkId == null)
+                return false;
+
+            if (delta < 0 && session.Gold + delta < 0)
+                return false;
+
+            session.Gold += delta;
+
+            // Marks the session dirty via IsDirty (Gold != SavedGold), so
+            // this rides the existing autosave cycle - no separate save
+            // call needed here. Sent immediately anyway, for the same
+            // reason a chat message doesn't wait for autosave: the number
+            // on screen should match the number the server just decided,
+            // now, not up to AutosaveIntervalSeconds from now.
+            W2CGoldUpdatePacketSender.Send(peer, session.Gold);
+
+            return true;
         }
     }
 }

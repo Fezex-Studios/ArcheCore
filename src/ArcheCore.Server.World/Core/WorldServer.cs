@@ -269,6 +269,7 @@ public class WorldServer : IHostedService, INetEventListener
         services.Register(_itemManager);
         services.Register(_world);
         services.Register(_playerManager.Jumps);
+        services.Register(_world);
 
         _packetDispatcher.AutoRegister(services.Resolve, typeof(WorldServer).Assembly);
     }

@@ -47,9 +47,6 @@ namespace ArcheCore.Server.World.Managers
             SnapshotDispatcher snapshots,
             TickClock clock,
             JumpEventBroadcaster jump
-            
-            
-            
             )
         {
             _sessions = sessions;
@@ -159,6 +156,14 @@ namespace ArcheCore.Server.World.Managers
             session.CharacterId = character.CharacterId;
             session.Name = character.Name;
             session.Level = character.Level;
+
+            // Same load-response-to-session copy as Level and Position.
+            // A brand-new character's P2WCharacterLoadResponse.Gold comes
+            // back as whatever /characters/create seeded it with (0, via
+            // the column default) - there is no separate "starting gold"
+            // branch here for the same reason there isn't one for Level.
+            session.Gold = character.Gold;
+
             session.Position = spawn;
             session.SpawnRequested = true;
 
@@ -183,6 +188,13 @@ namespace ArcheCore.Server.World.Managers
                 isNpc: false, _clock.Current);
 
             W2CSpawnPlayerPacketSender.Send(_replication, peer, networkId, spawn, true);
+
+            // Tell the client their starting balance. Sent once here,
+            // unconditionally, so the client never has to assume a default
+            // before the server has actually told it anything - the same
+            // reasoning as sending MOTD and the spawn packet on every
+            // connect rather than only the first one.
+            W2CGoldUpdatePacketSender.Send(peer, session.Gold);
 
             var (entered, _) = _interest.UpdatePosition(networkId, spawn);
 

@@ -65,7 +65,6 @@ public static class ServerBootstrap
         builder.Services.AddSingleton<QuestManager>();
         builder.Services.AddSingleton<ItemManager>();
         builder.Services.AddSingleton<DemoManager>();
-        builder.Services.AddSingleton<JumpEventBroadcaster>();
 
         return builder;
     }
