@@ -19,5 +19,6 @@ namespace ArcheCore.Network.Shared.Packets.PersistenceServer.W2P
         public float Y;
     
         public float Z;
+        public int Gold;
     }
 }

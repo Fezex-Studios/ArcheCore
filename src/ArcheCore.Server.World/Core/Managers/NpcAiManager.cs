@@ -18,7 +18,7 @@ namespace ArcheCore.Server.World.Managers
     /// AI thread reading the grid concurrently with the main thread's
     /// player-movement writes would corrupt it. Instead, WorldServer's tick
     /// loop calls Tick() once per tick, and the interval gating below
-    /// (AiInterval / SpawnerScanInterval) keeps the actual AI/scan work
+    /// (DecisionInterval / SpawnerScanInterval) keeps waypoint and scan work
     /// from running every tick - same cadence as before, just on the main
     /// thread instead of a second one.
     ///
@@ -78,10 +78,26 @@ namespace ArcheCore.Server.World.Managers
         private readonly ConcurrentDictionary<int, NpcAiState> _active = new();
 
         private DateTime _lastSpawnerScan = DateTime.MinValue;
-        private DateTime _lastAiTick = DateTime.MinValue;
+        private DateTime _lastDecisionTick = DateTime.MinValue;
+        private DateTime _lastMoveTick = DateTime.MinValue;
 
-        private static readonly TimeSpan AiInterval = TimeSpan.FromMilliseconds(300);
+        /// <summary>
+        /// How often an NPC picks a NEW WAYPOINT. A decision, not a
+        /// movement - 300ms is fine for choosing where to wander next,
+        /// and re-rolling it every tick would produce jitter, not smoother
+        /// motion.
+        /// </summary>
+        private static readonly TimeSpan DecisionInterval = TimeSpan.FromMilliseconds(300);
+
         private static readonly TimeSpan SpawnerScanInterval = TimeSpan.FromSeconds(1);
+
+        /// <summary>
+        /// Upper bound on the movement delta, so a long hitch - a GC pause,
+        /// a debugger breakpoint, the process being suspended - doesn't
+        /// teleport every NPC across its leash radius in one step when the
+        /// tick loop resumes.
+        /// </summary>
+        private static readonly TimeSpan MaxMoveDelta = TimeSpan.FromMilliseconds(250);
 
         private const float WanderSpeed = 2.0f;   // world units/sec
         private const float LeashRadius = 15f;    // max wander distance from spawn origin
@@ -110,9 +126,10 @@ namespace ArcheCore.Server.World.Managers
         public void Start()
         {
             _lastSpawnerScan = DateTime.MinValue;
-            _lastAiTick = DateTime.MinValue;
-            Logger.Info("NpcAiManager ready (AI tick every {0}ms, spawner scan every {1}s, driven by the main tick loop).",
-                AiInterval.TotalMilliseconds, SpawnerScanInterval.TotalSeconds);
+            _lastDecisionTick = DateTime.MinValue;
+            _lastMoveTick = DateTime.MinValue;
+            Logger.Info("NpcAiManager ready (movement every tick, waypoint decisions every {0}ms, spawner scan every {1}s, driven by the main tick loop).",
+                DecisionInterval.TotalMilliseconds, SpawnerScanInterval.TotalSeconds);
         }
 
         public void Stop()
@@ -124,7 +141,8 @@ namespace ArcheCore.Server.World.Managers
         /// <summary>
         /// Called once per tick from WorldServer's tick loop, on the same
         /// thread as everything else that touches InterestManager/
-        /// SpatialGrid. Internally rate-limited by AiInterval/
+        /// SpatialGrid. Movement runs every tick; waypoint decisions and
+        /// spawner scans are rate-limited by DecisionInterval/
         /// SpawnerScanInterval so this stays cheap on ticks where neither
         /// is due yet.
         /// </summary>
@@ -140,12 +158,47 @@ namespace ArcheCore.Server.World.Managers
                     RunSpawnerScan();
                 }
 
-                if (now - _lastAiTick >= AiInterval)
+                // DECISIONS: pick a new waypoint for any NPC that has
+                // arrived. Rate-limited, because "where shall I wander
+                // next" does not need re-answering 20 times a second.
+                if (now - _lastDecisionTick >= DecisionInterval)
                 {
-                    var delta = _lastAiTick == DateTime.MinValue ? AiInterval : now - _lastAiTick;
-                    _lastAiTick = now;
-                    RunAiStep(delta);
+                    _lastDecisionTick = now;
+                    RunDecisionStep();
                 }
+
+                // MOVEMENT: advance every NPC toward its current waypoint,
+                // EVERY TICK.
+                //
+                // This used to run on the same 300ms clock as the decision
+                // above, and that was the bug. An NPC's position only
+                // changed once every 6 ticks, so SnapshotDispatcher had the
+                // same coordinates to send on the other five - and the
+                // client, receiving six samples one tick apart of which
+                // five were identical, rendered the NPC standing still for
+                // 250ms and then covering 300ms of travel in a single 50ms
+                // segment. Stand, dash, stand, dash.
+                //
+                // Deciding and moving are different questions at different
+                // rates. Every tick the NPC takes one tick's worth of a
+                // step; every 300ms it reconsiders where it's heading.
+                //
+                // It also fixes something subtler: the server's own idea of
+                // where an NPC is was a staircase, up to 300ms stale.
+                // Nothing reads it yet, but melee range, aggro radius and
+                // AoE overlap all will, and none of them should be working
+                // from a position the NPC left a third of a second ago.
+                var moveDelta = _lastMoveTick == DateTime.MinValue
+                    ? TimeSpan.Zero
+                    : now - _lastMoveTick;
+
+                _lastMoveTick = now;
+
+                if (moveDelta > MaxMoveDelta)
+                    moveDelta = MaxMoveDelta;
+
+                if (moveDelta > TimeSpan.Zero)
+                    RunMoveStep(moveDelta);
             }
             catch (Exception ex)
             {
@@ -204,7 +257,40 @@ namespace ArcheCore.Server.World.Managers
 
         // --- Wander AI ---
 
-        private void RunAiStep(TimeSpan delta)
+        /// <summary>
+        /// Give a new waypoint to every NPC that has arrived at its last
+        /// one, or never had one. Runs on DecisionInterval.
+        ///
+        /// Note an NPC that arrives between decision passes simply stands
+        /// still until the next one - up to 300ms of idle at each waypoint.
+        /// That reads as deliberate pausing rather than as a stall, and
+        /// removing it would mean re-rolling targets every tick, which is
+        /// twitchier, not smoother.
+        /// </summary>
+        private void RunDecisionStep()
+        {
+            foreach (var state in _active.Values)
+            {
+                if (state.WanderTarget is { } existing &&
+                    Vector3.Distance(state.CurrentPosition, existing) >= ArriveDistance)
+                {
+                    continue; // still travelling - leave it alone
+                }
+
+                double angle = _rng.NextDouble() * Math.PI * 2;
+                double dist = _rng.NextDouble() * LeashRadius;
+
+                state.WanderTarget = state.SpawnOrigin + new Vector3(
+                    (float)(Math.Cos(angle) * dist), 0,
+                    (float)(Math.Sin(angle) * dist));
+            }
+        }
+
+        /// <summary>
+        /// Advance every NPC one tick's worth toward its waypoint. Runs
+        /// EVERY tick - see the comment in Tick().
+        /// </summary>
+        private void RunMoveStep(TimeSpan delta)
         {
             foreach (var state in _active.Values)
                 StepOne(state, delta);
@@ -212,16 +298,13 @@ namespace ArcheCore.Server.World.Managers
 
         private void StepOne(NpcAiState state, TimeSpan delta)
         {
-            if (state.WanderTarget is not { } target ||
-                Vector3.Distance(state.CurrentPosition, target) < ArriveDistance)
-            {
-                double angle = _rng.NextDouble() * Math.PI * 2;
-                double dist = _rng.NextDouble() * LeashRadius;
-                target = state.SpawnOrigin + new Vector3(
-                    (float)(Math.Cos(angle) * dist), 0,
-                    (float)(Math.Sin(angle) * dist));
-                state.WanderTarget = target;
-            }
+            // No waypoint yet - the next decision pass will give it one.
+            // Nothing is reported for this NPC on this tick, which is
+            // correct: it genuinely hasn't moved, and SnapshotDispatcher's
+            // staleness window lets it go quiet rather than repeating a
+            // position nobody needs told about twice.
+            if (state.WanderTarget is not { } target)
+                return;
 
             var toTarget = target - state.CurrentPosition;
             var distance = toTarget.Length();
@@ -233,11 +316,11 @@ namespace ArcheCore.Server.World.Managers
             var newPos = state.CurrentPosition + direction * step;
             state.CurrentPosition = newPos;
 
-            // Velocity for the client to extrapolate along between AI steps.
-            // The AI runs at 300ms while snapshots go out at tick rate, so
-            // observers are interpolating across a comparatively long gap
-            // and the extrapolation matters more here than it does for
-            // players.
+            // Velocity for the client to extrapolate along through a
+            // dropped snapshot. Movement now runs at tick rate, same as a
+            // player's, so an NPC is no longer a special case here - the
+            // gap an observer interpolates across is whatever its LOD tier
+            // gives it, exactly as for a player.
             //
             // Zero on the step that ARRIVES, which is the NPC equivalent of
             // the client's stop packet: the NPC is about to pick a new

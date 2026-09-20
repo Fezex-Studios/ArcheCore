@@ -30,8 +30,36 @@ namespace ArcheCore.Server.World.Managers
         private readonly SnapshotDispatcher _snapshots;
         private readonly TickClock _clock;
         private readonly MovementValidator _validator;
+        private readonly JumpEventBroadcaster _jumps;
 
         public InterestManager Interest => _interest;
+
+        /// <summary>
+        /// Exposed so WorldServer can hand it to the packet dispatcher's
+        /// service container - C2WMovementHandler takes it as a constructor
+        /// parameter.
+        ///
+        /// Built in here rather than registered in ServerBootStrap because
+        /// it needs SessionManager and TickClock, and both of those are
+        /// created with `new` in this constructor rather than coming from
+        /// DI. Registering it in DI would mean it couldn't be resolved.
+        /// </summary>
+        public JumpEventBroadcaster Jumps => _jumps;
+
+        /// <summary>
+        /// Exposed so WorldServer can call ConfigureFromInterest on it at
+        /// startup.
+        ///
+        /// The snapshot LOD tier boundaries and InterestManager's
+        /// spawn/despawn radii describe the same thing - how far away an
+        /// entity is - from two directions, and they used to be independent
+        /// constants in two files. They drifted: MidRange sat at 80 while
+        /// DespawnRadius was 85, so entities in the 80-85 hysteresis band
+        /// were still being rendered while falling into the slowest
+        /// replication tier. Deriving one from the other makes that class
+        /// of mistake impossible rather than merely unlikely.
+        /// </summary>
+        public SnapshotDispatcher Snapshots => _snapshots;
 
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
@@ -66,13 +94,18 @@ namespace ArcheCore.Server.World.Managers
             // which would mean touching the handler's DI registration.
             _validator = new MovementValidator(_replication);
 
+            // Turns the rising edge of MovementState.Jumping into one
+            // reliable W2CJumpEvent per observer. Must be constructed after
+            // _sessions and _clock, which it depends on.
+            _jumps = new JumpEventBroadcaster(_sessions, _interest, _replication, _clock);
+
             _movement = new PlayerMovementBroadcaster(
                 _sessions, _interest, _replication, spawnManager, _snapshots, _clock);
 
             _spawn = new PlayerSpawnManager(
                 _sessions, _persistence, _replication, _interest,
                 _luaEngine, worldConfig, demoManager, spawnManager,
-                _snapshots, _clock);
+                _snapshots, _clock, _jumps);
         }
 
         public void InitializeScripts() => _luaEngine.LoadAllScripts(Lua);
@@ -242,9 +275,19 @@ namespace ArcheCore.Server.World.Managers
         /// replicated entity despawns - the store has no other pruning, so a
         /// missed call is a permanent leak, and for NPCs (whose spawners
         /// cycle continuously as players move) an unbounded one.
+        ///
+        /// The jump broadcaster is pruned here for the same reason, plus a
+        /// second one: it keeps the last state byte per entity to detect
+        /// the rising edge of a jump, and LiteNetLib recycles network ids.
+        /// A recycled id that inherited a stale Jumping bit would have its
+        /// first real jump swallowed, because the edge would look like it
+        /// had already happened.
         /// </summary>
-        public void RemoveReplicatedEntity(int networkId) =>
+        public void RemoveReplicatedEntity(int networkId)
+        {
             _snapshots.Remove(networkId);
+            _jumps.Remove(networkId);
+        }
 
         // --- Interaction system ---
 

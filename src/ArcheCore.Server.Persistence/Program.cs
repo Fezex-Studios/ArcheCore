@@ -122,6 +122,12 @@ app.MapPost("/characters/create", async (HttpContext context, PersistenceDbConte
             PosX      = 0,
             PosY      = 2,
             PosZ      = 0
+            // Gold intentionally left unset here — the column default (0)
+            // is the single source of truth for starting balance. If you
+            // ever want a non-zero starting balance, set it here
+            // explicitly rather than changing the column default, so the
+            // decision is visible in the code that creates characters,
+            // not buried in a migration.
         };
 
         db.Characters.Add(character);
@@ -170,6 +176,10 @@ app.MapPost("/characters/list", async (HttpContext context, PersistenceDbContext
             CharacterId = c.CharacterId,
             Name        = c.Name,
             Level       = c.Level
+            // Gold is NOT on the character-select summary on purpose — the
+            // list screen shows who you are, not what you're worth. Add it
+            // here (and to CharacterSummary itself) only if the launcher's
+            // character-select UI ends up wanting to display it.
         })
         .ToArrayAsync();
 
@@ -216,7 +226,8 @@ app.MapPost("/characters/load", async (HttpContext context, PersistenceDbContext
             Level       = 0,
             X           = 0,
             Y           = 0,
-            Z           = 0
+            Z           = 0,
+            Gold        = 0
         });
         return;
     }
@@ -230,7 +241,8 @@ app.MapPost("/characters/load", async (HttpContext context, PersistenceDbContext
         Level       = row.Level,
         X           = row.PosX,
         Y           = row.PosY,
-        Z           = row.PosZ
+        Z           = row.PosZ,
+        Gold        = row.Gold
     });
 });
 
@@ -259,13 +271,21 @@ app.MapPost("/characters/save", async (HttpContext context, PersistenceDbContext
         // was never needed — and `WHERE account_id` turns a mismatched
         // AccountId from a bug (silent ownership transfer) into a visible
         // zero-row result.
+        //
+        // `gold` added to the SET list. The column's own CHECK constraint
+        // (CK_characters_gold_nonnegative) is the last line of defence if
+        // a negative value ever reaches this far — PlayerManager.TryAddGold
+        // is supposed to have refused it long before the packet was sent,
+        // so hitting the constraint here means that guard was bypassed,
+        // not that this endpoint needs its own copy of the same check.
         var rows = await db.Database.ExecuteSqlInterpolatedAsync($"""
             UPDATE characters
                SET name  = {request.Name},
                    level = {request.Level},
                    pos_x = {request.X},
                    pos_y = {request.Y},
-                   pos_z = {request.Z}
+                   pos_z = {request.Z},
+                   gold  = {request.Gold}
              WHERE character_id = {request.CharacterId}
                AND account_id   = {request.AccountId}
             """);
@@ -291,6 +311,13 @@ app.MapPost("/characters/save", async (HttpContext context, PersistenceDbContext
         // WorldServer. This still doesn't send a body (matching the old
         // fire-and-forget behavior), but the 500 means you *can* check
         // the status code now if you choose to.
+        //
+        // A MySQL CHECK-constraint violation (gold would have gone
+        // negative) lands here too, as a generic exception — worth
+        // grepping this log for "gold" specifically if TryAddGold's
+        // in-memory guard and this endpoint's stored value ever disagree,
+        // since that combination should be impossible and means one of
+        // the two checks has a bug.
         Console.Error.WriteLine($"[Persistence] Save failed for CharacterId={request.CharacterId}: {e}");
         context.Response.StatusCode = StatusCodes.Status500InternalServerError;
     }

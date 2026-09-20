@@ -13,5 +13,6 @@ namespace ArcheCore.Network.Shared.Packets.PersistenceServer.P2W
         public float  X;
         public float  Y;
         public float  Z;
+        public int Gold;
     }
 }

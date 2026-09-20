@@ -24,8 +24,17 @@ namespace ArcheCore.PersistenceServer.Api.Data
                 entity.Property(c => c.PosX).HasColumnName("pos_x").HasDefaultValue(0f);
                 entity.Property(c => c.PosY).HasColumnName("pos_y").HasDefaultValue(2f);
                 entity.Property(c => c.PosZ).HasColumnName("pos_z").HasDefaultValue(0f);
-
+                
+                // Never negative at the schema level too - belt and braces
+                // alongside PlayerManager.TryAddGold refusing to go below
+                // zero. A CHECK constraint catches anything that ever
+                // bypasses the C# path (a manual UPDATE, a future admin
+                // tool) before it becomes a negative balance in the DB.
+                entity.Property(c => c.Gold).HasColumnName("gold").HasDefaultValue(0);
+                entity.HasCheckConstraint("CK_characters_gold_nonnegative", "gold >= 0");
+                
                 entity.HasIndex(c => c.AccountId);
+                
             });
         }
     }

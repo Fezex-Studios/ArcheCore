@@ -63,16 +63,36 @@ namespace Worldserver.ArcheCore.PersistenceServer.Scripts
         }
 
         // Request/response pair — Load, Create, List, Connect all use this.
+        //
+        // TEMPORARY INSTRUMENTATION. Remove once the login latency question
+        // is answered — timing every persistence call forever is log noise.
         internal async Task<TResponse> PostAsync<TRequest, TResponse>(
             string route, TRequest payload)
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+
             using var content = BuildContent(payload);
+            var serializeMs = sw.Elapsed.TotalMilliseconds;
 
             var httpResponse = await _http.PostAsync(route, content);
+            var sendMs = sw.Elapsed.TotalMilliseconds;
+
             httpResponse.EnsureSuccessStatusCode();
 
             await using var stream = await httpResponse.Content.ReadAsStreamAsync();
-            return await MessagePackSerializer.DeserializeAsync<TResponse>(stream);
+            var openStreamMs = sw.Elapsed.TotalMilliseconds;
+
+            var result = await MessagePackSerializer.DeserializeAsync<TResponse>(stream);
+            var totalMs = sw.Elapsed.TotalMilliseconds;
+
+            // Cumulative, not per-phase, so it reads as a timeline —
+            // whichever gap is biggest is the phase that cost you.
+            Logger.Info(
+                $"[PersistenceTiming] {route} | serialize={serializeMs:F1} " +
+                $"send={sendMs:F1} openStream={openStreamMs:F1} " +
+                $"deserialize={totalMs:F1} (cumulative ms)");
+
+            return result;
         }
 
         // Like the fire-and-forget overload below, but reports whether the

@@ -1,6 +1,8 @@
 using System;
 using System.Diagnostics;
 using System.Numerics;
+using ArcheCore.Movement;
+using ArcheCore.Movement.Terrain;
 using ArcheCore.Server.World.Networking.W2C;
 using LiteNetLib;
 using NLog;
@@ -61,9 +63,59 @@ namespace ArcheCore.Server.World.Managers
 
         private readonly ReplicationManager _replication;
 
+        /// <summary>
+        /// Real ground truth, when a heightmap has been loaded for this
+        /// zone. Null is a supported state - a zone with no exported
+        /// heightmap yet simply isn't terrain-validated, same as an
+        /// instance/dungeon interior (see HeightmapCollisionWorld's
+        /// remarks on out-of-bounds queries). Nothing else here changes
+        /// behaviour when it's null; the budget checks above are the
+        /// floor this class always had.
+        /// </summary>
+        private readonly HeightmapCollisionWorld _terrain;
+        private readonly MovementProfile _terrainProfile;
+
+        /// <summary>
+        /// Slack, in world units, allowed between the client's reported Y
+        /// and the heightmap's answer before it counts as "below ground".
+        /// Not zero, on purpose: the exported heightmap resolution won't
+        /// perfectly match Unity's rendered terrain mesh on every texel
+        /// (see HeightmapData's remarks on consistency vs fidelity), the
+        /// client's own capsule keeps a skin-width gap, and legitimate
+        /// standing-on-a-moving-platform or standing-on-another-entity
+        /// positions aren't terrain height at all. This is deliberately
+        /// generous - it exists to catch someone meters under the map, not
+        /// to nitpick centimetre slope disagreement.
+        /// </summary>
+        public float TerrainEmbedTolerance = 1.5f;
+
         public MovementValidator(ReplicationManager replication)
+            : this(replication, null)
+        {
+        }
+
+        /// <param name="terrain">
+        /// Pass a loaded HeightmapCollisionWorld to additionally reject
+        /// positions the server can prove are below the actual ground -
+        /// the check the budget system was explicitly documented as NOT
+        /// doing. Pass null (or use the other constructor) to keep the old
+        /// budget-only behaviour, e.g. before any heightmap has been
+        /// exported for a zone.
+        /// </param>
+        public MovementValidator(ReplicationManager replication, HeightmapCollisionWorld terrain)
         {
             _replication = replication;
+            _terrain = terrain;
+
+            // A stand-in profile for the validator's own terrain probe.
+            // This does NOT need to match every player's real movement
+            // profile exactly - it only asks "is there ground meaningfully
+            // below this reported position", which is a coarse question a
+            // generic humanoid capsule answers well enough. A mount or a
+            // creature with a wildly different capsule can get its own
+            // profile passed in later if this ever needs per-character
+            // accuracy.
+            _terrainProfile = new MovementProfile();
         }
 
         // --- Tuning. Wire these to WorldServerConfig when you care. ---
@@ -258,6 +310,17 @@ namespace ArcheCore.Server.World.Managers
                     return Reject(peer, session, $"downward speed ({-vertical / dt:F1} u/s sustained)");
             }
 
+            // GROUND TRUTH. Everything above this catches how fast a
+            // position was reached; this catches whether the position
+            // itself could ever be legitimate. A speed budget alone cannot
+            // - the class remarks say so directly, and it's what let a
+            // buggy or malicious client report a Y underneath the terrain
+            // and have every observer render it as "fell through the
+            // floor", because nothing server-side had real geometry to
+            // check that claim against. Now something does.
+            if (!ValidateAgainstTerrain(position, out string terrainReason))
+                return Reject(peer, session, terrainReason);
+
             session.LastValidPosition = position;
             session.LastMoveTime = now;
 
@@ -329,5 +392,46 @@ namespace ArcheCore.Server.World.Managers
 
         private static bool IsFinite(Vector3 v) =>
             float.IsFinite(v.X) && float.IsFinite(v.Y) && float.IsFinite(v.Z);
+
+        /// <summary>
+        /// True if this position is consistent with the loaded terrain, or
+        /// if there's no terrain to check it against. False only for a
+        /// position the heightmap can PROVE is wrong - below ground by
+        /// more than TerrainEmbedTolerance. Anything this can't prove
+        /// (no heightmap loaded, position outside the loaded extent, an
+        /// instance interior) passes, because "unproven" is not the same
+        /// claim as "wrong" - see HeightmapCollisionWorld's remarks on
+        /// out-of-bounds queries.
+        /// </summary>
+        private bool ValidateAgainstTerrain(Vector3 position, out string reason)
+        {
+            reason = null;
+
+            if (_terrain == null)
+                return true;
+
+            float halfHeight = _terrainProfile.HalfHeight;
+            float segment = _terrainProfile.CapsuleSegment;
+            float radius = _terrainProfile.Radius - _terrainProfile.SkinWidth;
+
+            // Capsule centre from the reported FEET position - position on
+            // the wire is feet-on-ground, same convention PlayerSession and
+            // the spawn/interest code already use. See MoveState.Position's
+            // remark on centre vs. feet for why the motor itself works in
+            // centre space; this stays in feet space because that's what
+            // every other server system already agreed on for this field.
+            Vector3 center = position + new Vector3(0f, halfHeight, 0f);
+
+            if (!_terrain.CheckCapsule(center, radius, segment))
+                return true; // above ground, or outside the loaded heightmap - nothing to catch
+
+            _terrain.ComputePenetration(center, radius, segment, out _, out float depth);
+
+            if (depth <= TerrainEmbedTolerance)
+                return true; // within the slack this class documents above
+
+            reason = $"below terrain by {depth:F1} units";
+            return false;
+        }
     }
 }

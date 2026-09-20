@@ -4,6 +4,7 @@ using System.Numerics;
 using ArcheCore.Network.Shared.Packets.C2W;
 using ArcheCore.Network.Worldserver;
 using ArcheCore.Server.World.Managers;
+using ArcheCore.Server.World.Replication;
 using LiteNetLib;
 using MessagePack;
 
@@ -14,11 +15,14 @@ namespace ArcheCore.Server.World.Networking.C2W
     public class C2WMovementHandler : IPacketHandler
     {
         private readonly PlayerManager playerManager;
+        private readonly JumpEventBroadcaster jumps;
 
         public C2WMovementHandler(
-            PlayerManager playerManager)
+            PlayerManager playerManager,
+            JumpEventBroadcaster jumps)
         {
             this.playerManager = playerManager;
+            this.jumps = jumps;
         }
 
         public void Handle(
@@ -64,6 +68,17 @@ namespace ArcheCore.Server.World.Networking.C2W
             if (!playerManager.TryAcceptMovement(peer, session, position, velocity))
                 return;
 
+            // Jump detection, AFTER the gate. A rejected position must not
+            // author a jump event, or a client that gets snapped back for
+            // speed hacking still gets every observer to render an arc
+            // starting from a position the server refused to believe.
+            //
+            // Cheap in the common case: one dictionary lookup and a bit
+            // test. Only the rising edge of MovementState.Jumping produces
+            // a packet, so holding the bit set for the whole arc - which is
+            // what the client does - costs nothing after the first tick.
+            jumps.OnMovement(networkId, position, velocity, packet.state);
+
             // Rotation and state are NOT validated and are relayed as sent.
             // That is deliberate, and safe only for as long as nothing on
             // the server reads them: they exist so other clients can face
@@ -74,6 +89,13 @@ namespace ArcheCore.Server.World.Networking.C2W
             // checks InCombat - the claim has to be verified against what
             // the server knows the character actually has and is doing,
             // because at that point the byte becomes worth lying about.
+            //
+            // The Jumping bit is the first partial exception. Nothing here
+            // trusts the client's vertical velocity - JumpEventBroadcaster
+            // substitutes the server's own MovementConstants.JumpVelocity -
+            // precisely because observers SIMULATE that number for most of
+            // a second, which is the one case where a lie about state stops
+            // being self-inflicted.
             playerManager.BroadcastPosition(
                 peer,
                 networkId,

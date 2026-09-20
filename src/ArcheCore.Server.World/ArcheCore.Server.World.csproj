@@ -83,6 +83,7 @@
     </ItemGroup>
 
     <ItemGroup>
+      <ProjectReference Include="..\ArcheCore.Movement\ArcheCore.Movement.csproj" />
       <ProjectReference Include="..\ArcheCore.Network\ArcheCore.Network.csproj" />
     </ItemGroup>
 

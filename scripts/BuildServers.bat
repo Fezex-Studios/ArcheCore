@@ -1,6 +1,6 @@
 @echo off
 pushd ..\src\ArcheCore.Server.Auth
-bun build src/index.ts --compile --outfile ./bin/ArcheCore.Authserver
+dotnet build -c Debug
 popd
 
 

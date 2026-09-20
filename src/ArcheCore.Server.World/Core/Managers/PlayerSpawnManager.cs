@@ -33,6 +33,7 @@ namespace ArcheCore.Server.World.Managers
         private readonly SpawnManager _worldSpawnManager;
         private readonly SnapshotDispatcher _snapshots;
         private readonly TickClock _clock;
+        private readonly JumpEventBroadcaster _jumps;
 
         public PlayerSpawnManager(
             SessionManager sessions,
@@ -44,7 +45,12 @@ namespace ArcheCore.Server.World.Managers
             DemoManager demoManager,
             SpawnManager worldSpawnManager,
             SnapshotDispatcher snapshots,
-            TickClock clock)
+            TickClock clock,
+            JumpEventBroadcaster jump
+            
+            
+            
+            )
         {
             _sessions = sessions;
             _persistence = persistence;
@@ -56,6 +62,7 @@ namespace ArcheCore.Server.World.Managers
             _worldSpawnManager = worldSpawnManager;
             _snapshots = snapshots;
             _clock = clock;
+            _jumps = jump;
         }
 
         public void HandlePlayerConnected(
@@ -125,6 +132,7 @@ namespace ArcheCore.Server.World.Managers
 
             _interest.Remove(networkId);
             _snapshots.Remove(networkId);
+            _jumps.Remove(networkId);
 
             _sessions.UnregisterNetworkId(networkId);
             peer.Tag = null;

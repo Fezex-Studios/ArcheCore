@@ -35,6 +35,21 @@ public class WorldServerConfig
     public bool AllowDebugCommands { get; set; } = false;
 
     /// <summary>
+    /// Path to this zone's exported terrain heightmap (see
+    /// TerrainHeightmapExporter / HeightmapData), used by MovementValidator
+    /// to reject positions it can prove are below the actual ground -
+    /// see that class's remarks on why the speed budget alone can't.
+    ///
+    /// Empty/null is a supported, non-fatal state: the zone simply runs
+    /// without terrain validation, same as before this existed. That
+    /// matters for interiors and instances, which have no open terrain to
+    /// export in the first place - don't point this at anything for those.
+    /// One heightmap per outdoor zone; a multi-zone shard needs one
+    /// WorldServerConfig (or one HeightmapTerrainPath) per zone process.
+    /// </summary>
+    public String HeightmapTerrainPath { get; set; } = String.Empty;
+
+    /// <summary>
     /// Called once at boot, before the socket opens. Every check here is
     /// something that silently produces a working-looking server with no
     /// security: a default secret that an attacker already knows, or a
