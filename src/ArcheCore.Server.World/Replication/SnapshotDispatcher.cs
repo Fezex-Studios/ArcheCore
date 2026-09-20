@@ -52,12 +52,17 @@ namespace ArcheCore.Server.World.Replication
     /// ADDED: velocity, stored alongside position and written only for
     /// NEAR-TIER entries. The client uses it to extrapolate through a
     /// dropped or late snapshot instead of freezing the remote character
-    /// until the next one lands. Restricting it to the near tier is the
-    /// whole reason it's affordable: a mid-tier entity updates every 3rd
-    /// tick and a far-tier one every 10th, and at those rates the client
-    /// gets a real position back before extrapolation would have earned
-    /// its three bytes. Near-tier entries are 15 bytes, everything else
-    /// stays at 12.
+    /// until the next one lands.
+    ///
+    /// CORRECTED: velocity used to be restricted to the near tier, on the
+    /// theory that slower tiers get a real position back before
+    /// extrapolation would have earned its three bytes. That was exactly
+    /// backwards. Near tier updates every tick, so there is almost no gap
+    /// to extrapolate across; the slow tiers have 150-500ms of silence and
+    /// are the ones that cannot survive without it. A mid or far entity
+    /// with no velocity doesn't drift slightly wrong - it stops dead at
+    /// the end of its interpolation segment and waits. Every entry now
+    /// carries velocity: 15 bytes each.
     /// </summary>
     public sealed class SnapshotDispatcher
     {
@@ -67,12 +72,97 @@ namespace ArcheCore.Server.World.Replication
         public float NearRange = 30f;
         public int   NearInterval = 1;
 
-        /// <summary>Reduced rate. Interpolation covers the gap.</summary>
-        public float MidRange = 80f;
+        /// <summary>
+        /// Reduced rate. Interpolation covers the gap.
+        ///
+        /// SET THIS FROM THE INTEREST RADII, not by hand.
+        ///
+        /// This number and InterestManager's SpawnRadius/DespawnRadius
+        /// describe the same thing from two directions - how far away an
+        /// entity is - and they were independent magic numbers that drifted
+        /// apart. With MidRange 80, SpawnRadius 75 and DespawnRadius 85,
+        /// entities in the 80-85 hysteresis band (still visible, on their
+        /// way out) landed in the FAR tier at 2Hz. That is exactly the
+        /// "between the green and amber circles" band where the stutter was
+        /// worst, and nothing in either class said so - you had to hold
+        /// three numbers from two files in your head to see it.
+        ///
+        /// ConfigureFromInterest() below derives these, so the relationship
+        /// is enforced instead of remembered.
+        /// </summary>
+        public float MidRange = 85f;
         public int   MidInterval = 3;
 
-        /// <summary>Background rate. Mostly "still there, roughly here".</summary>
-        public int   FarInterval = 10;
+        /// <summary>
+        /// Background rate, for entities in the hysteresis band between
+        /// SpawnRadius and DespawnRadius - on their way out of awareness.
+        ///
+        /// WAS 10 (2Hz). That is too slow for anything a player can still
+        /// see. 2Hz means 500ms between positions, and a character walking
+        /// at 5 u/s covers 2.5 units in that time - the interpolator has to
+        /// stretch a single straight segment across two and a half metres
+        /// of real movement, and any direction change inside that window is
+        /// invisible until it's already over. 5 (4Hz) is the floor for
+        /// anything rendered.
+        /// </summary>
+        public int   FarInterval = 5;
+
+        /// <summary>
+        /// How long an entity keeps being replicated after its last
+        /// movement packet, in ticks. 20 = one second at 20Hz.
+        ///
+        /// THIS WAS THE STUTTER.
+        ///
+        /// The check used to be `tick - LastChangedTick > interval`, which
+        /// looks reasonable and is subtly broken, because it has to pass on
+        /// the SAME tick as the phase gate above it. Those two gates are
+        /// independent:
+        ///
+        ///   phase:     eligible only when (tick + id) % interval == 0
+        ///   staleness: eligible only if a movement packet arrived within
+        ///              the last `interval` ticks
+        ///
+        /// The client's send loop runs on Unity's frame rate and is not
+        /// synchronised to the server tick, so whether a movement packet
+        /// happens to have landed inside the last 3 ticks is effectively a
+        /// coin flip at each phase slot. Miss one, and the next chance is
+        /// `interval` ticks later.
+        ///
+        /// Measured on a live two-client test, mid tier (interval 3, so an
+        /// intended 150ms cadence) produced arrival gaps of:
+        ///
+        ///     150ms  150ms  389ms  150ms  601ms  469ms  150ms ...
+        ///
+        /// Those are 3, 3, ~8, 3, ~12, ~9 ticks - one slot, one slot, three
+        /// slots skipped, one, four skipped, three skipped. Every skip is a
+        /// coin flip that came up tails. No client-side interpolation can
+        /// smooth that, because the timeline genuinely has holes in it.
+        ///
+        /// Decoupling the window from the interval fixes it. The gate's
+        /// actual job is "stop replicating an entity that has stopped
+        /// moving", and that question has nothing to do with the LOD tier -
+        /// one second of stillness means stopped at any distance. Cost of
+        /// the wider window: a stopped entity is sent a few more times
+        /// before going quiet. That is nothing.
+        /// </summary>
+        public uint StaleAfterTicks = 20;
+
+        /// <summary>
+        /// Skip an entity that has said nothing new since the previous slot
+        /// for its tier.
+        ///
+        /// The phase gate above makes an entity's send ticks deterministic:
+        /// for a given interval, the previous opportunity was exactly
+        /// `interval` ticks ago. So if the transform hasn't changed since
+        /// then, the observer already has this exact state and the entry
+        /// would be pure waste - and worse than waste, because the client
+        /// buffers it as a distinct sample and renders a stall.
+        ///
+        /// This is only safe because SetTransform now compares VALUES
+        /// before advancing LastChangedTick. With the old write-stamps-tick
+        /// behaviour it would have suppressed nothing at all.
+        /// </summary>
+        public bool SkipUnchanged = true;
 
         /// <summary>
         /// Max entities in one observer's snapshot. 150 is a reasonable
@@ -166,6 +256,63 @@ namespace ArcheCore.Server.World.Replication
             bool isNpc,
             uint tick)
         {
+            // LastChangedTick means CHANGED, not WRITTEN.
+            //
+            // This distinction is the whole fix. Every gate downstream asks
+            // "has this entity got anything new to say", and the answer has
+            // to come from comparing VALUES, not from the fact that someone
+            // called this method. Stamping the tick unconditionally makes
+            // every write look like news, and the dispatcher then spends a
+            // snapshot entry re-stating a position the observer already has.
+            //
+            // Two separate symptoms came from that, and they looked
+            // unrelated until you see this line:
+            //
+            //   NPCs. Their AI wrote a position once per tick but only
+            //   MOVED them every 300ms, so five writes in six were
+            //   identical. Observers received six samples a tick apart, of
+            //   which five showed no motion - so the character stood still
+            //   for 250ms and then covered the whole step in one 50ms
+            //   segment. Stand, dash, stand, dash.
+            //
+            //   PLAYERS. The client's send clock and the server's tick
+            //   clock are independent and free-running, so they beat
+            //   against each other. Most ticks catch one client packet;
+            //   occasionally a tick catches none (the previous position
+            //   gets re-sent, and the observer's derived velocity reads
+            //   0.00 mid-run) and the next catches two (velocity reads
+            //   double). Measured while auto-running at a constant 5 u/s:
+            //   4.88, 5.09, 4.65, 10.17, 5.09, 0.31, 0.00, 5.09, 0.00.
+            //
+            // Comparing values fixes both without needing the two clocks to
+            // agree about anything, which is why this beats the obvious
+            // alternative of timestamping packets at the client and
+            // synchronising clocks. A shared clock would also work, and
+            // AAEmu's UnitMoveType does carry a Time field - but it is a
+            // wire format change, a sync handshake, offset estimation and
+            // drift correction, to answer a question that comparing two
+            // vectors already answers exactly.
+            //
+            // The epsilon is deliberately tiny - far below the position
+            // codec's own quantization step - because this is a duplicate
+            // check, not a "has it moved enough to be worth sending" check.
+            // Those are different questions and conflating them is how you
+            // get characters that stop reporting while creeping.
+            const float ChangeEpsilonSq = 1e-8f;
+
+            var changed = true;
+
+            if (_transforms.TryGetValue(networkId, out var previous))
+            {
+                changed =
+                    Vector3.DistanceSquared(previous.Position, position) > ChangeEpsilonSq ||
+                    Vector3.DistanceSquared(previous.Velocity, velocity) > ChangeEpsilonSq ||
+                    previous.Yaw   != yaw   ||
+                    previous.Pitch != pitch ||
+                    previous.Roll  != roll  ||
+                    previous.State != state;
+            }
+
             _transforms[networkId] = new Transform
             {
                 Position        = position,
@@ -174,7 +321,12 @@ namespace ArcheCore.Server.World.Replication
                 Pitch           = pitch,
                 Roll            = roll,
                 State           = state,
-                LastChangedTick = tick,
+
+                // Unchanged? Keep the tick from when it last actually
+                // changed, so the staleness gate still eventually goes
+                // quiet for a character that has genuinely stopped.
+                LastChangedTick = changed ? tick : previous.LastChangedTick,
+
                 IsNpc           = isNpc
             };
         }
@@ -255,8 +407,18 @@ namespace ArcheCore.Server.World.Replication
                 // then has nothing to correct it with. The client sends
                 // one zero-velocity packet on the moving->stopped edge for
                 // exactly this reason.
-                if (tick - t.LastChangedTick > (uint)interval)
+                if (tick - t.LastChangedTick > StaleAfterTicks)
                     continue;
+
+                // Nothing new since this tier's previous slot - see
+                // SkipUnchanged. Costs one subtraction and saves both the
+                // bytes and the client-side stall the duplicate would
+                // have caused.
+                if (SkipUnchanged && tick >= (uint)interval &&
+                    t.LastChangedTick <= tick - (uint)interval)
+                {
+                    continue;
+                }
 
                 if (!EntityStateCodec.IsEncodable(t.Position, observerPos))
                     continue;
@@ -296,9 +458,36 @@ namespace ArcheCore.Server.World.Replication
             {
                 var c = _scratch[i];
 
-                // Velocity only where the client will actually extrapolate
-                // with it. See the class comment.
-                var includeVelocity = c.Interval == NearInterval;
+                // Velocity on EVERY tier, not just near.
+                //
+                // The original reasoning here was backwards. It spent the
+                // three bytes where extrapolation is "actually visible" -
+                // near tier - but near tier updates every single tick, so
+                // there is barely any gap to extrapolate ACROSS. The tiers
+                // that genuinely need velocity are the slow ones, where the
+                // client has 150-500ms of nothing between packets. Without
+                // it, `_to + _velocity * overtime` adds zero and the entity
+                // FREEZES at the end of each segment until the next packet
+                // lands. Move, freeze, move, freeze.
+                //
+                // Measured, with two clients: everything past 30 units
+                // reported velZero=True and visibly stuttered; inside 30
+                // units velocity arrived (vel=7.27) and the motion was
+                // smooth. The tier boundary and the stutter boundary were
+                // the same line.
+                //
+                // Cross-checked against AAEmu's reverse-engineered
+                // UnitMoveType, which carries VelX/VelY/VelZ on every
+                // movement packet with no distance gating at all. Same
+                // conclusion from the other direction.
+                //
+                // Cost: 3 bytes per entry, 12 -> 15. At 150 entities that
+                // is 450 bytes per observer per snapshot, and the writer's
+                // MTU budget already bounds the packet - a fuller entry
+                // means slightly fewer entities per tick, not a bigger
+                // packet. That is the right trade: an entity you can see
+                // moving smoothly beats one more entity frozen in place.
+                const bool includeVelocity = true;
 
                 if (!writer.TryWriteEntity(
                         c.NetworkId, c.Position, c.Velocity,
@@ -332,6 +521,34 @@ namespace ArcheCore.Server.World.Replication
                     $"[SnapshotDispatcher] Oversized snapshot for observer {observerId} " +
                     $"({writer.Length} bytes, {writer.EntryCount} entities) — dropped, not sent. {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Derive the LOD tiers from the interest radii, so replication
+        /// rate and visibility can't contradict each other.
+        ///
+        /// The rule that matters: NOTHING STILL VISIBLE MAY FALL INTO THE
+        /// SLOWEST TIER. An entity inside DespawnRadius is on someone's
+        /// screen, and the tier boundaries have to respect that. MidRange
+        /// is therefore pinned to DespawnRadius rather than chosen
+        /// independently - the far tier then exists only for entities the
+        /// interest manager has already released, which is to say never in
+        /// practice, and it stays in the code for when a larger view
+        /// distance makes a third tier genuinely worth having.
+        ///
+        /// Call once at startup, after InterestManager is constructed.
+        /// </summary>
+        public void ConfigureFromInterest(InterestManager interest)
+        {
+            // Near tier: the inner 40% of the view radius. Close enough
+            // that a player is looking directly at them and any drop below
+            // full rate is visible.
+            NearRange = interest.SpawnRadius * 0.4f;
+
+            // Everything else that can still be seen. Pinned to the OUTER
+            // radius, not the spawn radius, because the hysteresis band
+            // between them is still rendered.
+            MidRange = interest.DespawnRadius;
         }
 
         private int IntervalFor(float distanceSq)

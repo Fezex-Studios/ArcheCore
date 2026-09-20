@@ -1,0 +1,6 @@
+@ArcheCore.Server.Auth_HostAddress = http://localhost:5047
+
+GET {{ArcheCore.Server.Auth_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

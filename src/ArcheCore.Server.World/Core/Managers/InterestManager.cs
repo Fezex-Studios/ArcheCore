@@ -4,43 +4,95 @@ using System.Numerics;
 namespace ArcheCore.Server.World.Managers
 {
     /// <summary>
-    /// Replacement for the locked, allocating InterestManager.
+    /// Decides who is aware of whom.
     ///
-    /// WHAT WAS WRONG WITH THE OLD ONE
+    /// WHAT CHANGED: INTEREST IS A CIRCLE NOW, NOT A BOX
     ///
-    /// UpdatePosition ran the full set-difference on EVERY movement packet
-    /// and allocated a fresh HashSet plus two Lists each time. At 20k
-    /// players moving at 10Hz that is 600,000 allocations per second doing
-    /// work that is almost always a no-op, because a player who moved 30cm
-    /// has the same neighbours they had last tick. The comment in the old
-    /// file about avoiding LINQ was solving the right problem one layer too
-    /// low: the fix isn't cheaper set difference, it's not running it.
+    /// Interest used to be pure cell membership - you were aware of
+    /// everything in the 3x3 block of cells around your own. That block is
+    /// anchored to the GRID, not to you, so your view distance depended on
+    /// where inside a cell you were standing: 75 units in every direction
+    /// from the middle, but 25 one way and 125 the other from a corner.
+    /// Players saw each other at wildly different ranges depending on
+    /// nothing they could perceive, and everything re-evaluated in a jump
+    /// whenever someone crossed a boundary.
     ///
-    /// Now the grid tells us whether the entity crossed a cell boundary,
-    /// and everything below that check is skipped when it didn't. That is
-    /// roughly a 95% reduction in the dominant cost, and it means the
-    /// remaining 5% can afford to be thorough.
+    /// The grid is now a broad phase only. It cheaply answers "what might
+    /// be close", and this class filters that by real distance. Visibility
+    /// is a circle of SpawnRadius centred on the entity, identical
+    /// everywhere on the map.
     ///
-    /// GetKnownBy also allocated a new List on every call. SnapshotDispatcher
-    /// calls it once per player per tick - 200,000 times a second at target
-    /// load - so it now returns a maintained, reusable view instead.
+    /// WHY TWO RADII
     ///
-    /// NOT THREAD SAFE, BY DESIGN. The old class locked because NPC AI ran
-    /// on a separate thread. That model doesn't scale to N cores. One
-    /// InterestManager belongs to one WorldWorker and is touched by exactly
-    /// one thread. See SpatialGrid and INTEGRATION.md.
+    /// Cell granularity was accidentally providing hysteresis: you had to
+    /// cross an entire boundary before anything changed. An exact distance
+    /// test removes that, and a player standing at exactly the edge would
+    /// spawn and despawn on alternating ticks - a strobing entity on every
+    /// nearby client and a reliable spawn/despawn packet every tick for
+    /// each of them.
+    ///
+    /// So awareness STARTS at SpawnRadius and ENDS at DespawnRadius, and
+    /// the gap between them is the dead band. Something already known stays
+    /// known until it is properly gone.
+    ///
+    /// WHY A MOVEMENT THRESHOLD AND NOT JUST CELL CROSSINGS
+    ///
+    /// The old fast path skipped everything when an entity stayed in its
+    /// cell, which was exactly correct when interest WAS cell membership:
+    /// no cell change meant no possible relationship change. With distance
+    /// that reasoning no longer holds - two entities can drift apart inside
+    /// one 50-unit cell by enough to leave each other's radius.
+    ///
+    /// Recompute is therefore triggered by EITHER a cell crossing OR having
+    /// moved RecomputeThreshold units since the last recompute. The
+    /// threshold is half the hysteresis gap on purpose: two entities each
+    /// drifting just under the threshold can close or open the distance
+    /// between them by just under the full gap, which is exactly the band
+    /// the dead zone absorbs. Widen the gap if you widen the threshold, or
+    /// entities can slip through the band unnoticed.
+    ///
+    /// NOT THREAD SAFE, BY DESIGN. One InterestManager belongs to one
+    /// thread. NPC AI runs inside the main tick for this reason.
     /// </summary>
     public sealed class InterestManager
     {
         private readonly SpatialGrid _grid;
 
+        // ── Tuning ───────────────────────────────────────────────────────
+
+        /// <summary>
+        /// How close something must come to enter awareness. This is the
+        /// real view distance and the number to hand the client so its
+        /// culling matches the server's.
+        /// </summary>
+        public float SpawnRadius { get; }
+
+        /// <summary>
+        /// How far something must get to leave awareness. Must be larger
+        /// than SpawnRadius; the difference is the dead band that stops
+        /// edge flicker.
+        /// </summary>
+        public float DespawnRadius { get; }
+
+        /// <summary>
+        /// How far an entity may move before its interest set is
+        /// recomputed even without crossing a cell.
+        /// </summary>
+        public float RecomputeThreshold { get; }
+
         /// <summary>
         /// networkId -> who it is currently aware of. ObserverSet keeps a
-        /// List for indexed, allocation-free iteration and a parallel index
-        /// map for O(1) contains and removal, because the hot loop needs
-        /// both and a bare HashSet only gives one of them cheaply.
+        /// List for indexed, allocation-free iteration plus a parallel
+        /// index map for O(1) contains and removal, because the hot loop
+        /// needs both and a bare HashSet only gives one cheaply.
         /// </summary>
         private readonly Dictionary<int, ObserverSet> _known = new(capacity: 32_768);
+
+        /// <summary>
+        /// Where each entity was when its interest set was last recomputed.
+        /// Drives the movement threshold above.
+        /// </summary>
+        private readonly Dictionary<int, Vector3> _lastRecomputeAt = new(capacity: 32_768);
 
         // Scratch buffers, reused. Never allocate inside UpdatePosition.
         private readonly List<int> _nearbyScratch = new(capacity: 512);
@@ -48,9 +100,24 @@ namespace ArcheCore.Server.World.Managers
         private readonly List<int> _entered = new(capacity: 64);
         private readonly List<int> _left = new(capacity: 64);
 
-        public InterestManager(float cellSize = 50f)
+        /// <param name="cellSize">
+        /// Broad-phase granularity only - it no longer has anything to do
+        /// with view distance. Closest to optimal is roughly DespawnRadius:
+        /// the ring stays at 1 and the square is the tightest square that
+        /// can contain the circle. Smaller cells mean more dictionary
+        /// lookups but fewer wasted distance checks.
+        /// </param>
+        public InterestManager(
+            float cellSize = 50f,
+            float spawnRadius = 75f,
+            float despawnRadius = 85f,
+            float recomputeThreshold = 5f)
         {
             _grid = new SpatialGrid(cellSize);
+
+            SpawnRadius        = spawnRadius;
+            DespawnRadius      = despawnRadius;
+            RecomputeThreshold = recomputeThreshold;
         }
 
         public float CellSize => _grid.CellSize;
@@ -58,11 +125,7 @@ namespace ArcheCore.Server.World.Managers
         /// <summary>
         /// Call on every position change. Returns who entered and who left
         /// awareness. BOTH RETURNED LISTS ARE REUSED SCRATCH BUFFERS - read
-        /// them before the next call, do not store them.
-        ///
-        /// When the entity stayed inside its cell, both come back empty
-        /// without any set work happening at all. That's the common case
-        /// and it is the whole point of this class's rewrite.
+        /// them before the next call, never store them.
         /// </summary>
         public (List<int> entered, List<int> left) UpdatePosition(int networkId, Vector3 position)
         {
@@ -70,37 +133,21 @@ namespace ArcheCore.Server.World.Managers
             _left.Clear();
 
             var crossedCell = _grid.Update(networkId, position);
+            var isKnown     = _known.ContainsKey(networkId);
 
-            // Fast path. Same cell, so no cell-granularity relationship can
-            // have changed. Movement itself still replicates - that's the
-            // SnapshotDispatcher's job, not this one's.
-            if (!crossedCell && _known.ContainsKey(networkId))
+            // Fast path. Still in the same cell AND hasn't drifted far
+            // enough for any relationship to have crossed the dead band.
+            // This is the common case and it's why the rest can afford to
+            // be thorough.
+            if (!crossedCell && isKnown && !MovedEnough(networkId, position))
                 return (_entered, _left);
 
-            _grid.GetNearby(networkId, _nearbyScratch);
+            _lastRecomputeAt[networkId] = position;
 
-            // Hard ceiling on how many nearby entities get processed for
-            // enter/leave bookkeeping. Without this, a dense cluster (or,
-            // worse, thousands of bots random-walking near a shared spawn
-            // point instead of spreading across a real map) makes a
-            // single cell crossing trigger symmetric ObserverSet updates
-            // against however many hundreds or thousands of entities are
-            // nearby - unbounded, and the direct cause of tick time
-            // climbing from ~0ms to 140ms+ as bot count grew to 5000 even
-            // after SnapshotDispatcher's own scan cap was in place (see
-            // TickHealth logs, 2026-09-17 01:xx run - gen2GC stayed near
-            // 0 throughout, ruling out GC; the shape was still O(local
-            // density) per crossing).
-            //
-            // No position data is available at this layer - SpatialGrid
-            // tracks cell membership only, not coordinates - so this caps
-            // by raw count rather than true nearest-N. Under realistic,
-            // non-pathological clustering that distinction rarely
-            // matters; the goal is a hard ceiling on worst-case cost, not
-            // perfect selection under an extreme crush.
-            const int MaxNearbyCandidates = 300;
-            if (_nearbyScratch.Count > MaxNearbyCandidates)
-                _nearbyScratch.RemoveRange(MaxNearbyCandidates, _nearbyScratch.Count - MaxNearbyCandidates);
+            // ── Narrow phase ────────────────────────────────────────────
+            // Everything genuinely within SpawnRadius. Note this is a
+            // circle of world units, not a square of cells.
+            _grid.GetWithinRadius(position, SpawnRadius, _nearbyScratch, excludeId: networkId);
 
             _nearbySet.Clear();
             for (int i = 0; i < _nearbyScratch.Count; i++)
@@ -109,20 +156,30 @@ namespace ArcheCore.Server.World.Managers
             if (!_known.TryGetValue(networkId, out var mine))
                 _known[networkId] = mine = new ObserverSet();
 
+            // Entering: inside SpawnRadius and not already known.
             foreach (var id in _nearbySet)
             {
                 if (!mine.Contains(id))
                     _entered.Add(id);
             }
 
+            // Leaving: known, but now beyond DespawnRadius. The asymmetry
+            // with the check above IS the dead band - something between the
+            // two radii is in neither list and simply stays as it was.
             for (int i = 0; i < mine.Items.Count; i++)
             {
                 var id = mine.Items[i];
-                if (!_nearbySet.Contains(id))
+
+                if (_nearbySet.Contains(id))
+                    continue;
+
+                if (!_grid.WithinRadius(networkId, id, DespawnRadius))
                     _left.Add(id);
             }
 
-            // Apply symmetrically: if B entered A's awareness, A entered B's.
+            // Apply symmetrically: if B entered A's awareness, A entered
+            // B's. Distance is symmetric, so this stays consistent even
+            // though the two entities recompute at different moments.
             for (int i = 0; i < _entered.Count; i++)
             {
                 var other = _entered[i];
@@ -146,9 +203,19 @@ namespace ArcheCore.Server.World.Managers
             return (_entered, _left);
         }
 
+        private bool MovedEnough(int networkId, Vector3 position)
+        {
+            if (!_lastRecomputeAt.TryGetValue(networkId, out var last))
+                return true;
+
+            return Vector3.DistanceSquared(position, last)
+                   > RecomputeThreshold * RecomputeThreshold;
+        }
+
         public void Remove(int networkId)
         {
             _grid.Remove(networkId);
+            _lastRecomputeAt.Remove(networkId);
 
             if (_known.TryGetValue(networkId, out var mine))
             {
@@ -167,17 +234,36 @@ namespace ArcheCore.Server.World.Managers
         /// <summary>
         /// Who this entity is aware of. Returns a LIVE, REUSED view - safe
         /// to read within the tick, never safe to cache across ticks or
-        /// mutate. Callers previously got a defensive copy; at 200k calls a
-        /// second that copy was pure waste.
+        /// mutate.
         /// </summary>
         public IReadOnlyList<int> GetKnownBy(int networkId) =>
             _known.TryGetValue(networkId, out var set) ? set.Items : EmptyList;
+
+        public bool TryGetPosition(int networkId, out Vector3 position) =>
+            _grid.TryGetPosition(networkId, out position);
+
+        // ── Coarse proximity helpers ─────────────────────────────────────
+        //
+        // Cell-granularity, no distance filter. Deliberately left as they
+        // were: spawner activation and chat shout range don't need an exact
+        // boundary, and making them exact would cost distance checks for no
+        // perceptible gain. If you ever want an exact one, use
+        // GetWithinRadiusOf below instead of widening these.
 
         public void GetNearbyAtRadius(int networkId, int radiusCells, List<int> results) =>
             _grid.GetNearby(networkId, results, radiusCells);
 
         public void GetNearbyAtPosition(Vector3 position, int radiusCells, List<int> results) =>
             _grid.GetNearby(position, results, radiusCells);
+
+        /// <summary>
+        /// Exact-distance neighbourhood query for callers that want one -
+        /// an AoE spell, a proximity trigger, a "who heard that" check that
+        /// should not depend on grid alignment.
+        /// </summary>
+        public void GetWithinRadiusOf(
+            Vector3 origin, float radius, List<int> results, int excludeId = -1) =>
+            _grid.GetWithinRadius(origin, radius, results, excludeId);
 
         /// <summary>
         /// List plus index map. Indexed iteration for the replication loop,

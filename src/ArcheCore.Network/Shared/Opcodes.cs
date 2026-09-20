@@ -32,6 +32,9 @@
         PlayerSpawned = 29,
         W2CWorldSnapshot = 30, // W2C: batched, quantized per-tick movement snapshot (unreliable) — see SnapshotDispatcher/SnapshotWriter
         W2CPositionCorrection = 31, // W2C: reliable snap-back after MovementValidator rejects a client's reported position
+        W2CJumpEvent = 32,
+        W2CGoldUpdate        = 33, // W2C: absolute gold balance for one player - see W2CGoldUpdatePacket
+        C2WDebugAddGold      = 34, // C2W: DEV ONLY - see C2WDebugAddGoldHandler
 
     }
 }

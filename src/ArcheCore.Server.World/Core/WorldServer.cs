@@ -111,6 +111,27 @@ public class WorldServer : IHostedService, INetEventListener
         _playerManager = new PlayerManager(_spawnManager, _replicationManager, _world, _persistenceClient, _demoManager, _interestManager);
         _playerManager.InitializeScripts();
 
+        // Derive the snapshot LOD tiers from the interest radii. Must run
+        // after both exist; nothing reads these values until the first
+        // Flush, so the exact position within startup doesn't matter, but
+        // keeping it here keeps the dependency visible instead of buried
+        // further down.
+        //
+        // WHY THIS EXISTS: these two classes describe the same distances
+        // from opposite directions, and holding independent numbers in two
+        // files let them drift. MidRange was 80 while DespawnRadius was 85,
+        // which put every entity in the 80-85 hysteresis band - still
+        // visible, by definition, since that band is what stops spawn/
+        // despawn flicker - into the slowest replication tier at 2Hz.
+        _playerManager.Snapshots.ConfigureFromInterest(_interestManager);
+
+        Logger.Info(
+            "[LOD] near<{NearRange} mid<{MidRange} | interest spawn={SpawnRadius} despawn={DespawnRadius}",
+            _playerManager.Snapshots.NearRange,
+            _playerManager.Snapshots.MidRange,
+            _interestManager.SpawnRadius,
+            _interestManager.DespawnRadius);
+
         // NpcAiManager has no thread of its own - RunTickLoopAsync calls
         // Tick() once per tick, on the same thread as everything else that
         // touches InterestManager/SpatialGrid (neither is thread-safe).
@@ -247,6 +268,7 @@ public class WorldServer : IHostedService, INetEventListener
         services.Register(_spawnManager);
         services.Register(_itemManager);
         services.Register(_world);
+        services.Register(_playerManager.Jumps);
 
         _packetDispatcher.AutoRegister(services.Resolve, typeof(WorldServer).Assembly);
     }

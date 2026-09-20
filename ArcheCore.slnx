@@ -2,6 +2,7 @@
   <Project Path="src/ArcheCore.Movement/ArcheCore.Movement.csproj" />
   <Project Path="src/ArcheCore.Network/ArcheCore.Network.csproj" />
   <Project Path="src/ArcheCore.Server.World/ArcheCore.Server.World.csproj" />
+  <Project Path="src/ArcheCore.Server.Auth/ArcheCore.Server.Auth.csproj" />
   <Project Path="src/ArcheCore.Server.Persistence/ArcheCore.Server.Persistence.csproj" />
   <Project Path="src/LoadTester/LoadTester.csproj" />
 </Solution>
