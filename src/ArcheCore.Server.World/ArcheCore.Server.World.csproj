@@ -56,6 +56,7 @@
       <Folder Include="Core\PersistenceServer\" />
       <Folder Include="Data\" />
       <Folder Include="LuaSDK\" />
+      <Folder Include="Lua\Scripting\" />
       <Folder Include="Physics\" />
       <Folder Include="Services\" />
       <Folder Include="Utils\Database\MySQL\" />

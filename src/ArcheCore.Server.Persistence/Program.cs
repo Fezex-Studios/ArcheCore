@@ -1,3 +1,4 @@
+using ArcheCore.Network.Shared.Packets.PersistenceServer;
 using ArcheCore.Network.Shared.Packets.PersistenceServer.P2W;
 using ArcheCore.Network.Shared.Packets.PersistenceServer.W2P;
 using ArcheCore.PersistenceServer.Api.Data;
@@ -11,16 +12,6 @@ var connectionString = builder.Configuration.GetConnectionString("Persistence")
     ?? throw new InvalidOperationException("Missing 'Persistence' connection string.");
 
 // ── Shared secret with the WorldServer ───────────────────────────────
-// Every route below is privileged: they read and write character rows
-// for arbitrary account ids, with no user-level identity anywhere in the
-// protocol. The WorldServer is trusted to have already validated the
-// player's session before it calls here, which means the ONLY thing
-// standing between an attacker and "create/load/save any character on
-// the shard" is proof that the caller really is the WorldServer.
-//
-// Refuse to start without it. A persistence server that boots with an
-// empty or placeholder secret is worse than one that doesn't boot,
-// because it looks like it's working.
 var internalSecret = builder.Configuration["InternalSecret"];
 
 if (string.IsNullOrWhiteSpace(internalSecret)
@@ -42,9 +33,6 @@ builder.Services.AddDbContext<PersistenceDbContext>(options =>
 var app = builder.Build();
 
 // ── Gate EVERY route on the shared secret ────────────────────────────
-// Placed before any MapPost so a route added later is protected by
-// default rather than by remembering to protect it. Fixed-time compare
-// so the failure can't be turned into a byte-at-a-time oracle.
 app.Use(async (context, next) =>
 {
     var presented = context.Request.Headers["x-internal-secret"].ToString();
@@ -53,8 +41,6 @@ app.Use(async (context, next) =>
         || !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
                System.Text.Encoding.UTF8.GetBytes(presented), secretBytes))
     {
-        // 404, not 401: an unauthenticated caller shouldn't be able to
-        // confirm this service exists or enumerate which routes it has.
         context.Response.StatusCode = StatusCodes.Status404NotFound;
         Console.Error.WriteLine(
             $"[Persistence] Rejected {context.Request.Method} {context.Request.Path} " +
@@ -66,7 +52,6 @@ app.Use(async (context, next) =>
 });
 
 // ── /connect ─────────────────────────────────────────────────────────
-// Original just logged the message and sent back a fixed confirmation.
 app.MapPost("/connect", async (HttpContext context) =>
 {
     var request = await context.Request.ReadMsgPackAsync<W2PConnectionRequest>();
@@ -86,8 +71,6 @@ app.MapPost("/connect", async (HttpContext context) =>
 });
 
 // ── /hello-world ─────────────────────────────────────────────────────
-// Original never sent a response back — this keeps that: 200/empty on
-// success, 400 only if the body itself was unreadable.
 app.MapPost("/hello-world", async (HttpContext context) =>
 {
     var request = await context.Request.ReadMsgPackAsync<W2PHelloWorldPacket>();
@@ -122,12 +105,10 @@ app.MapPost("/characters/create", async (HttpContext context, PersistenceDbConte
             PosX      = 0,
             PosY      = 2,
             PosZ      = 0
-            // Gold intentionally left unset here — the column default (0)
-            // is the single source of truth for starting balance. If you
-            // ever want a non-zero starting balance, set it here
-            // explicitly rather than changing the column default, so the
-            // decision is visible in the code that creates characters,
-            // not buried in a migration.
+            // Gold intentionally left unset - column default (0) is the
+            // single source of truth for starting balance. Inventory
+            // rows: none created here either - an empty inventory is the
+            // absence of rows, not a table full of zeroed placeholders.
         };
 
         db.Characters.Add(character);
@@ -176,10 +157,6 @@ app.MapPost("/characters/list", async (HttpContext context, PersistenceDbContext
             CharacterId = c.CharacterId,
             Name        = c.Name,
             Level       = c.Level
-            // Gold is NOT on the character-select summary on purpose — the
-            // list screen shows who you are, not what you're worth. Add it
-            // here (and to CharacterSummary itself) only if the launcher's
-            // character-select UI ends up wanting to display it.
         })
         .ToArrayAsync();
 
@@ -201,15 +178,10 @@ app.MapPost("/characters/load", async (HttpContext context, PersistenceDbContext
         return;
     }
 
-    // W2PCharacterLoadRequest.AccountId is `long` in the shared protocol,
-    // but the characters table (and every other W2P request) uses `int` —
-    // an existing mismatch in the protocol, not something this port added.
     var accountId = (int)request.AccountId;
 
     var query = db.Characters.AsNoTracking().Where(c => c.AccountId == accountId);
 
-    // Same branch as the original: a specific character if CharacterId was
-    // given, otherwise whichever character exists for the account.
     if (request.CharacterId > 0)
         query = query.Where(c => c.CharacterId == request.CharacterId);
 
@@ -227,10 +199,25 @@ app.MapPost("/characters/load", async (HttpContext context, PersistenceDbContext
             X           = 0,
             Y           = 0,
             Z           = 0,
-            Gold        = 0
+            Gold        = 0,
+            Inventory   = Array.Empty<InventorySlotDto>()
         });
         return;
     }
+
+    // Occupied slots only - a fresh or empty inventory is an empty array,
+    // not 20 zeroed rows. PlayerSpawnManager reconstructs the dense
+    // in-memory array on the WorldServer side.
+    var inventory = await db.InventoryItems
+        .AsNoTracking()
+        .Where(i => i.CharacterId == row.CharacterId)
+        .Select(i => new InventorySlotDto
+        {
+            Slot           = i.Slot,
+            ItemTemplateId = i.ItemTemplateId,
+            Quantity       = i.Quantity
+        })
+        .ToArrayAsync();
 
     await context.Response.WriteMsgPackAsync(new P2WCharacterLoadResponse
     {
@@ -242,14 +229,12 @@ app.MapPost("/characters/load", async (HttpContext context, PersistenceDbContext
         X           = row.PosX,
         Y           = row.PosY,
         Z           = row.PosZ,
-        Gold        = row.Gold
+        Gold        = row.Gold,
+        Inventory   = inventory
     });
 });
 
 // ── /characters/save ─────────────────────────────────────────────────
-// Original was `INSERT OR REPLACE` (a true upsert on an explicit id), not
-// update-only — ON DUPLICATE KEY UPDATE is the MySQL equivalent, in one
-// round trip, without going through EF's change tracker.
 app.MapPost("/characters/save", async (HttpContext context, PersistenceDbContext db) =>
 {
     var request = await context.Request.ReadMsgPackAsync<W2PCharacterSaveRequest>();
@@ -262,22 +247,6 @@ app.MapPost("/characters/save", async (HttpContext context, PersistenceDbContext
 
     try
     {
-        // UPDATE, not upsert, and scoped to the owning account.
-        //
-        // The previous version was INSERT ... ON DUPLICATE KEY UPDATE with
-        // `account_id = VALUES(account_id)` in the update list, which meant
-        // a save could REASSIGN a character to a different account. Rows
-        // are only ever created by /characters/create, so the insert half
-        // was never needed — and `WHERE account_id` turns a mismatched
-        // AccountId from a bug (silent ownership transfer) into a visible
-        // zero-row result.
-        //
-        // `gold` added to the SET list. The column's own CHECK constraint
-        // (CK_characters_gold_nonnegative) is the last line of defence if
-        // a negative value ever reaches this far — PlayerManager.TryAddGold
-        // is supposed to have refused it long before the packet was sent,
-        // so hitting the constraint here means that guard was bypassed,
-        // not that this endpoint needs its own copy of the same check.
         var rows = await db.Database.ExecuteSqlInterpolatedAsync($"""
             UPDATE characters
                SET name  = {request.Name},
@@ -292,10 +261,6 @@ app.MapPost("/characters/save", async (HttpContext context, PersistenceDbContext
 
         if (rows == 0)
         {
-            // Either the character doesn't exist or it belongs to someone
-            // else. Both are bugs upstream, and both used to be papered
-            // over — the first by silently inserting a row, the second by
-            // silently stealing one.
             Console.Error.WriteLine(
                 $"[Persistence] Save affected 0 rows: CharacterId={request.CharacterId} " +
                 $"is missing or not owned by AccountId={request.AccountId}.");
@@ -307,18 +272,102 @@ app.MapPost("/characters/save", async (HttpContext context, PersistenceDbContext
     }
     catch (Exception e)
     {
-        // Original only logged this — a save failure was invisible to
-        // WorldServer. This still doesn't send a body (matching the old
-        // fire-and-forget behavior), but the 500 means you *can* check
-        // the status code now if you choose to.
-        //
-        // A MySQL CHECK-constraint violation (gold would have gone
-        // negative) lands here too, as a generic exception — worth
-        // grepping this log for "gold" specifically if TryAddGold's
-        // in-memory guard and this endpoint's stored value ever disagree,
-        // since that combination should be impossible and means one of
-        // the two checks has a bug.
         Console.Error.WriteLine($"[Persistence] Save failed for CharacterId={request.CharacterId}: {e}");
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+    }
+});
+
+// ── /characters/inventory/save ───────────────────────────────────────
+// A per-slot diff, not a full snapshot - see W2PInventorySaveRequest.
+// Each entry either upserts a row (item present) or deletes it (slot
+// cleared: ItemTemplateId or Quantity <= 0). Wrapped in one transaction
+// so a batch of several slot changes either all land or none do - a
+// swap is two entries (both source and destination slots) and should
+// never be observed half-applied.
+app.MapPost("/characters/inventory/save", async (HttpContext context, PersistenceDbContext db) =>
+{
+    var request = await context.Request.ReadMsgPackAsync<W2PInventorySaveRequest>();
+
+    if (request is null)
+    {
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        return;
+    }
+
+    if (request.Changes is null || request.Changes.Length == 0)
+    {
+        // Nothing to do - still a success, not an error. WorldServer
+        // only calls this route when it has a non-empty diff, but a
+        // defensive no-op here is cheap and keeps this endpoint correct
+        // even if that ever changes.
+        return;
+    }
+
+    try
+    {
+        // Inventory rows carry no account_id of their own, so ownership
+        // is checked up front here, once, the same way /characters/save
+        // scopes its UPDATE to account_id - just as an explicit check
+        // instead of a WHERE clause, since this is a mix of deletes and
+        // upserts rather than one statement.
+        var owns = await db.Characters
+            .AsNoTracking()
+            .AnyAsync(c => c.CharacterId == request.CharacterId && c.AccountId == request.AccountId);
+
+        if (!owns)
+        {
+            Console.Error.WriteLine(
+                $"[Persistence] Inventory save rejected: CharacterId={request.CharacterId} " +
+                $"not owned by AccountId={request.AccountId}.");
+            context.Response.StatusCode = StatusCodes.Status409Conflict;
+            return;
+        }
+
+        await using var tx = await db.Database.BeginTransactionAsync();
+
+        foreach (var change in request.Changes)
+        {
+            if (change.ItemTemplateId <= 0 || change.Quantity <= 0)
+            {
+                // Slot cleared - delete, don't store a zeroed row. A
+                // delete for a slot that was already empty (never had a
+                // row) affects 0 rows and is not an error - the end
+                // state (no row) is exactly what was asked for.
+                await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    DELETE FROM character_inventory
+                     WHERE character_id = {request.CharacterId}
+                       AND slot         = {change.Slot}
+                    """);
+            }
+            else
+            {
+                await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    INSERT INTO character_inventory (character_id, slot, item_template_id, quantity)
+                    VALUES ({request.CharacterId}, {change.Slot}, {change.ItemTemplateId}, {change.Quantity})
+                    ON DUPLICATE KEY UPDATE
+                        item_template_id = VALUES(item_template_id),
+                        quantity         = VALUES(quantity)
+                    """);
+            }
+        }
+
+        await tx.CommitAsync();
+
+        Console.WriteLine(
+            $"[Persistence] CharacterId={request.CharacterId} inventory: " +
+            $"{request.Changes.Length} slot(s) applied.");
+    }
+    catch (Exception e)
+    {
+        // A CK_character_inventory_item_positive violation lands here
+        // too - it means a change with ItemTemplateId/Quantity > 0 was
+        // sent for a slot that should have gone through the DELETE
+        // branch instead, i.e. TryAddItem/TryMoveItem produced a bad
+        // value. Worth grepping this log for "inventory" specifically if
+        // that ever happens, since it means the WorldServer-side guard
+        // has a bug, not this endpoint.
+        Console.Error.WriteLine(
+            $"[Persistence] Inventory save failed for CharacterId={request.CharacterId}: {e}");
         context.Response.StatusCode = StatusCodes.Status500InternalServerError;
     }
 });
