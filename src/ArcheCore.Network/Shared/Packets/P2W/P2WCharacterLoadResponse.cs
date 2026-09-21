@@ -1,4 +1,5 @@
-﻿using MessagePack;
+using MessagePack;
+using ArcheCore.Network.Shared.Packets.PersistenceServer;
 
 namespace ArcheCore.Network.Shared.Packets.PersistenceServer.P2W
 {
@@ -13,6 +14,13 @@ namespace ArcheCore.Network.Shared.Packets.PersistenceServer.P2W
         public float  X;
         public float  Y;
         public float  Z;
-        public int Gold;
+        public int    Gold;
+
+        /// <summary>
+        /// Occupied inventory slots only - an empty inventory is an empty
+        /// array, not 20 zeroed entries. PlayerSpawnManager reconstructs
+        /// the dense 20-slot session.Inventory array from this on spawn.
+        /// </summary>
+        public InventorySlotDto[] Inventory;
     }
 }

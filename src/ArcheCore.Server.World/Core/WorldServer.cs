@@ -108,7 +108,7 @@ public class WorldServer : IHostedService, INetEventListener
         _interactions = new InteractionRegistry();
         _interestManager = new InterestManager();
         _spawnManager = new SpawnManager(_dbFactory, _interactions, _interestManager);
-        _playerManager = new PlayerManager(_spawnManager, _replicationManager, _world, _persistenceClient, _demoManager, _interestManager);
+        _playerManager = new PlayerManager(_spawnManager, _replicationManager, _world, _persistenceClient, _demoManager, _interestManager, _itemManager);
         _playerManager.InitializeScripts();
 
         // Derive the snapshot LOD tiers from the interest radii. Must run

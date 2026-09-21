@@ -17,6 +17,7 @@ public class WorldDataDbContext : DbContext
     public DbSet<NpcSpawnerTable> NpcSpawners  => Set<NpcSpawnerTable>();
     public DbSet<TestTableOne>  TestTableOnes => Set<TestTableOne>();
     public DbSet<ItemStats>      ItemStats => Set<ItemStats>();
+    public DbSet<ItemUse>        ItemUses  => Set<ItemUse>();
     public DbSet<ItemCategory>  ItemCategories => Set<ItemCategory>();
     public DbSet<ItemRarity>  ItemRarities => Set<ItemRarity>();
     public DbSet<ItemTable>       Items      => Set<ItemTable>();

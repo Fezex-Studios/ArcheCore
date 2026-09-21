@@ -1,6 +1,7 @@
 using System.Linq;
 using System.Numerics;
 using ArcheCore.Network.Shared.Packets.PersistenceServer.P2W;
+using ArcheCore.Network.Shared.Packets.W2C;
 using ArcheCore.Server.World.Lua.Scripting;
 using ArcheCore.Server.World.Lua.Scripting.Bindings;
 using ArcheCore.Server.World.Networking.W2C;
@@ -68,23 +69,18 @@ namespace ArcheCore.Server.World.Managers
             P2WCharacterLoadResponse character,
             bool isNewCharacter)
         {
-            // The peer may have disconnected while the character was loading
-            // from the persistence server. Spawning it now would create a
-            // ghost that nothing ever cleans up.
             if (peer.ConnectionState != ConnectionState.Connected)
             {
                 Logger.Info($"[Spawn] Account={accountId} disconnected before spawning - skipped.");
                 return;
             }
 
-            // Already in world (duplicate request slipped through) - never spawn twice.
             if (peer.Tag is PlayerSession { NetworkId: not null })
             {
                 Logger.Warn($"[Spawn] Account={accountId} is already in world - duplicate spawn ignored.");
                 return;
             }
 
-            // Same account logged in from a DIFFERENT connection: kick the old one.
             if (_sessions.TryGetAccountPeer(accountId, out var existingPeer) && existingPeer != peer)
             {
                 Logger.Info($"Duplicate login Account={accountId} - disconnecting previous connection");
@@ -112,7 +108,6 @@ namespace ArcheCore.Server.World.Managers
 
         public void CleanupPeer(NetPeer peer, bool save)
         {
-            // Never spawned (or never authenticated) - nothing to clean up.
             if (peer.Tag is not PlayerSession { NetworkId: int networkId } session)
                 return;
 
@@ -156,13 +151,38 @@ namespace ArcheCore.Server.World.Managers
             session.CharacterId = character.CharacterId;
             session.Name = character.Name;
             session.Level = character.Level;
-
-            // Same load-response-to-session copy as Level and Position.
-            // A brand-new character's P2WCharacterLoadResponse.Gold comes
-            // back as whatever /characters/create seeded it with (0, via
-            // the column default) - there is no separate "starting gold"
-            // branch here for the same reason there isn't one for Level.
             session.Gold = character.Gold;
+
+            // Rebuild the dense 20-slot array from the persistence
+            // server's sparse (occupied-slots-only) response. A new
+            // character has Inventory == null (nothing created yet) -
+            // treated the same as an empty array, not a null-ref.
+            session.Inventory = new InventorySlot[InventoryConstants.SlotCount];
+
+            if (character.Inventory != null)
+            {
+                foreach (var dto in character.Inventory)
+                {
+                    if (dto.Slot < 0 || dto.Slot >= InventoryConstants.SlotCount)
+                    {
+                        // Data from a slot count change (e.g. SlotCount
+                        // shrank after rows already existed for higher
+                        // slots) or a bad row - drop it rather than
+                        // crash the spawn. Worth grepping this log if it
+                        // ever fires for a real player.
+                        Logger.Warn(
+                            $"[Spawn] CharacterId={character.CharacterId}: ignoring out-of-range " +
+                            $"inventory slot {dto.Slot} from persistence.");
+                        continue;
+                    }
+
+                    session.Inventory[dto.Slot] = new InventorySlot
+                    {
+                        ItemTemplateId = dto.ItemTemplateId,
+                        Quantity       = dto.Quantity
+                    };
+                }
+            }
 
             session.Position = spawn;
             session.SpawnRequested = true;
@@ -171,13 +191,16 @@ namespace ArcheCore.Server.World.Managers
 
             if (isNewCharacter)
             {
-                // The DB row was created with a placeholder position; write the
-                // real spawn point now instead of waiting for the first autosave.
+                // New character - nothing to mark "already matches the
+                // database" yet (inventory is empty either way), so this
+                // just writes the real spawn point instead of waiting for
+                // the first autosave, same as before the inventory pass.
                 _persistence.SaveInBackground(session);
             }
             else
             {
-                // Just loaded - memory matches the database.
+                // Just loaded - memory (including the inventory array we
+                // just built) matches the database by construction.
                 session.MarkSaved();
             }
 
@@ -189,12 +212,17 @@ namespace ArcheCore.Server.World.Managers
 
             W2CSpawnPlayerPacketSender.Send(_replication, peer, networkId, spawn, true);
 
-            // Tell the client their starting balance. Sent once here,
-            // unconditionally, so the client never has to assume a default
-            // before the server has actually told it anything - the same
-            // reasoning as sending MOTD and the spawn packet on every
-            // connect rather than only the first one.
-            W2CGoldUpdatePacketSender.Send(peer, session.Gold);
+            // Everything the client needs to render itself, in one atomic
+            // send: name/level, gold, and full inventory. Pushed blind, no
+            // handshake - same approach Gold/Inventory always used, now
+            // covering CharacterData too instead of that being a separate
+            // client-request round trip (see the old PlayerSpawned opcode,
+            // retired).
+            W2CEnterWorldPacketSender.Send(
+                peer,
+                new CharacterData { Level = session.Level, Name = session.Name },
+                session.Gold,
+                session.Inventory);
 
             var (entered, _) = _interest.UpdatePosition(networkId, spawn);
 

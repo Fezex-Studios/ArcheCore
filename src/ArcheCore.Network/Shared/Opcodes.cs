@@ -29,12 +29,25 @@
         ItemRequestData            = 25,
         ItemDataResponse           = 26,
         LevelUp = 28,   // NEW
-        PlayerSpawned = 29,
+        // PlayerSpawned = 29 retired - replaced by W2CEnterWorld (39). The
+        // client used to ack "I'm actually spawned" before the server
+        // would send Level/Name; Gold/Inventory never waited for that ack
+        // in the first place. W2CEnterWorld sends all three the same way
+        // Gold/Inventory always were: pushed blind from SpawnPlayer, no
+        // handshake required.
         W2CWorldSnapshot = 30, // W2C: batched, quantized per-tick movement snapshot (unreliable) — see SnapshotDispatcher/SnapshotWriter
         W2CPositionCorrection = 31, // W2C: reliable snap-back after MovementValidator rejects a client's reported position
         W2CJumpEvent = 32,
         W2CGoldUpdate        = 33, // W2C: absolute gold balance for one player - see W2CGoldUpdatePacket
         C2WDebugAddGold      = 34, // C2W: DEV ONLY - see C2WDebugAddGoldHandler
+        W2CInventorySnapshot   = 35, // W2C: full inventory - kept for a possible future manual resync; not sent at spawn anymore, see W2CEnterWorld
+        W2CInventorySlotChanged = 36, // W2C: one slot changed
+        C2WMoveItem            = 37, // C2W: move/swap/merge two slots
+        C2WDebugAddItem        = 38, // C2W: DEV ONLY - see C2WDebugAddItemHandler
+        W2CEnterWorld           = 39, // W2C: everything the client needs on entering the world - CharacterData + Gold + Inventory, one atomic send
+        C2WDropItem             = 40, // C2W: destroy all or part of one slot - see PlayerManager.TryDropItem
+        C2WUseItem              = 41, // C2W: use one slot - ItemUse row decides effect/consume/cooldown, see PlayerManager.TryUseItem
+        W2CItemCooldown         = 42, // W2C: a cooldown group started - which item ids it covers and for how long
 
     }
 }

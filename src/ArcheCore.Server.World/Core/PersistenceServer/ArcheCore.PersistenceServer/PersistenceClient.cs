@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading.Tasks;
@@ -22,6 +22,7 @@ namespace Worldserver.ArcheCore.PersistenceServer.Scripts
         public W2PCharacterCreateSender W2PCharacterCreate { get; }
         public W2PCharacterListSender   W2PCharacterList   { get; }
         public W2PCharacterSaveSender   W2PCharacterSave   { get; }
+        public W2PInventorySaveSender   W2PInventorySave   { get; }
         public W2PConnectSender         W2PConnect         { get; }
         public W2PHelloWorldSender      W2PHelloWorld      { get; }
 
@@ -52,6 +53,7 @@ namespace Worldserver.ArcheCore.PersistenceServer.Scripts
             W2PCharacterCreate = new W2PCharacterCreateSender(this);
             W2PCharacterList   = new W2PCharacterListSender(this);
             W2PCharacterSave   = new W2PCharacterSaveSender(this);
+            W2PInventorySave   = new W2PInventorySaveSender(this);
             W2PConnect         = new W2PConnectSender(this);
             W2PHelloWorld      = new W2PHelloWorldSender(this);
         }
@@ -63,9 +65,6 @@ namespace Worldserver.ArcheCore.PersistenceServer.Scripts
         }
 
         // Request/response pair — Load, Create, List, Connect all use this.
-        //
-        // TEMPORARY INSTRUMENTATION. Remove once the login latency question
-        // is answered — timing every persistence call forever is log noise.
         internal async Task<TResponse> PostAsync<TRequest, TResponse>(
             string route, TRequest payload)
         {
@@ -85,8 +84,6 @@ namespace Worldserver.ArcheCore.PersistenceServer.Scripts
             var result = await MessagePackSerializer.DeserializeAsync<TResponse>(stream);
             var totalMs = sw.Elapsed.TotalMilliseconds;
 
-            // Cumulative, not per-phase, so it reads as a timeline —
-            // whichever gap is biggest is the phase that cost you.
             Logger.Info(
                 $"[PersistenceTiming] {route} | serialize={serializeMs:F1} " +
                 $"send={sendMs:F1} openStream={openStreamMs:F1} " +
@@ -95,9 +92,9 @@ namespace Worldserver.ArcheCore.PersistenceServer.Scripts
             return result;
         }
 
-        // Like the fire-and-forget overload below, but reports whether the
-        // server actually accepted the request (2xx). Still throws on network
-        // errors/timeouts - callers must catch.
+        // Reports whether the server actually accepted the request (2xx).
+        // Still throws on network errors/timeouts - callers must catch.
+        // Used by both W2PCharacterSave and W2PInventorySave.
         internal async Task<bool> PostForStatusAsync<TRequest>(string route, TRequest payload)
         {
             using var content = BuildContent(payload);
@@ -110,9 +107,8 @@ namespace Worldserver.ArcheCore.PersistenceServer.Scripts
             return httpResponse.IsSuccessStatusCode;
         }
 
-        // Fire-and-forget-style — Save and HelloWorld never returned a body
-        // even under TCP. Status code is checked purely for logging now,
-        // which is more visibility than the old version had, not less.
+        // Fire-and-forget-style — HelloWorld never returned a body even
+        // under TCP. Status code is checked purely for logging.
         internal async Task PostAsync<TRequest>(string route, TRequest payload)
         {
             using var content = BuildContent(payload);
