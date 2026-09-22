@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Numerics;
 using ArcheCore.Server.World.Core.Entities;
 using ArcheCore.Server.World.GameData.Npcs;
@@ -37,6 +37,7 @@ public class NpcSpawner(InteractionRegistry interactions)
             Level         = template.Level,
             ModelType     = template.ModelType,
             InteractRange = template.InteractRange,
+            IsStationary  = template.IsStationary,
             Position      = position,
             SpawnOrigin   = position
         };

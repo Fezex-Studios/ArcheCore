@@ -3,6 +3,7 @@ using ArcheCore.Library.Net.Worldserver;
 using System.Numerics;
 using ArcheCore.Network.Shared.Packets.C2W;
 using ArcheCore.Network.Worldserver;
+using ArcheCore.Server.World.Core.Entities;
 using ArcheCore.Server.World.Core.Interaction;
 using ArcheCore.Server.World.Managers;
 using ArcheCore.Server.World.Networking.W2C;
@@ -12,107 +13,100 @@ using NLog;
 
 namespace ArcheCore.Server.World.Networking.C2W
 {
+    /// <summary>
+    /// The player pressed interact on something. This handler owns the
+    /// checks every interaction shares - the target exists, the player is
+    /// in range - then routes on IInteractable.Kind:
+    ///
+    ///   HarvestNode -> HarvestManager.TryBeginHarvest
+    ///   Npc         -> ShopManager.TryOpen if it's a merchant,
+    ///                  then Lua OnInteract either way (dialogue, quests)
+    ///
+    /// Harvest nodes deliberately do NOT fire OnInteract: existing scripts
+    /// branch on template id alone, and a node template id colliding with
+    /// an NPC template id would make a rock say the guard's line. Nodes
+    /// fire their own OnHarvest instead.
+    ///
+    /// Per-step logging is at Debug now that the flow is proven - set NLog
+    /// to Debug to see it again.
+    /// </summary>
     [PacketOpcode(Opcodes.Interact)]
     public class C2WInteractHandler : IPacketHandler
     {
-        private readonly PlayerManager playerManager;
-        private readonly InteractionRegistry interactions;
+        private readonly PlayerManager _playerManager;
+        private readonly InteractionRegistry _interactions;
+        private readonly HarvestManager _harvest;
+        private readonly ShopManager _shops;
 
-        private static readonly Logger Logger =
-            LogManager.GetCurrentClassLogger();
+        private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
         public C2WInteractHandler(
             PlayerManager playerManager,
-            InteractionRegistry interactions)
+            InteractionRegistry interactions,
+            HarvestManager harvest,
+            ShopManager shops)
         {
-            this.playerManager = playerManager;
-            this.interactions = interactions;
+            _playerManager = playerManager;
+            _interactions = interactions;
+            _harvest = harvest;
+            _shops = shops;
         }
 
         public void Handle(NetPeer peer, NetPacketReader reader)
         {
-            Logger.Info($"[Interact] C2WInteractHandler RECEIVED packet from {peer.Address}");
+            var packet = MessagePackSerializer.Deserialize<C2WInteractPacket>(reader.GetRemainingBytes());
 
-            C2WInteractPacket packet =
-                MessagePackSerializer
-                    .Deserialize<C2WInteractPacket>(
-                        reader.GetRemainingBytes());
-
-            Logger.Info(
-                $"[Interact] TargetNetworkId={packet.TargetNetworkId}");
-
-            if (!playerManager.TryGetNetworkId(peer, out int playerId))
+            if (!_playerManager.TryGetNetworkId(peer, out int playerId))
             {
-                Logger.Warn(
-                    $"[Interact] FAILED: Could not resolve player NetworkId for {peer.Address}");
+                Logger.Warn($"[Interact] Could not resolve player NetworkId for {peer.Address}");
                 return;
             }
 
-            Logger.Info(
-                $"[Interact] PlayerNetworkId={playerId}");
-
-            if (!interactions.TryGet(packet.TargetNetworkId, out var target))
+            if (!_interactions.TryGet(packet.TargetNetworkId, out var target))
             {
-                Logger.Warn(
-                    $"[Interact] FAILED: NetworkId {packet.TargetNetworkId} not found in InteractionRegistry");
-
-                W2CInteractDeniedPacketSender.Send(
-                    peer,
-                    "That's no longer there.");
-
+                Logger.Debug($"[Interact] Target {packet.TargetNetworkId} not in InteractionRegistry");
+                W2CInteractDeniedPacketSender.Send(peer, "That's no longer there.");
                 return;
             }
 
-            Logger.Info(
-                $"[Interact] Target found: TemplateId={target.TemplateId}, " +
-                $"Kind={target.Kind}, " +
-                $"Position={target.Position}, " +
-                $"Range={target.InteractRange}");
-
-            if (!playerManager.TryGetPosition(playerId, out Vector3 playerPos))
+            if (!_playerManager.TryGetPosition(playerId, out Vector3 playerPos))
             {
-                Logger.Warn(
-                    $"[Interact] FAILED: Could not get player position for NetworkId={playerId}");
+                Logger.Warn($"[Interact] No position for player {playerId}");
                 return;
             }
-
-            Logger.Info(
-                $"[Interact] Player position={playerPos}");
 
             float distance = Vector3.Distance(playerPos, target.Position);
-
-            Logger.Info(
-                $"[Interact] Distance={distance:F2}, Allowed={target.InteractRange:F2}");
+            Logger.Debug($"[Interact] Player {playerId} -> {target.Kind} template {target.TemplateId}, distance {distance:F2}/{target.InteractRange:F2}");
 
             if (distance > target.InteractRange)
             {
-                Logger.Warn(
-                    $"[Interact] DENIED: Too far away");
-
-                W2CInteractDeniedPacketSender.Send(
-                    peer,
-                    "Too far away.");
-
+                W2CInteractDeniedPacketSender.Send(peer, "Too far away.");
                 return;
             }
 
-            var luaPlayer = playerManager.CreateLuaPlayer(peer);
+            // ── Harvest nodes ──
+            if (target.Kind == InteractableKind.HarvestNode)
+            {
+                if (_harvest.TryGetNode(packet.TargetNetworkId, out var node))
+                    _harvest.TryBeginHarvest(peer, playerId, node);
+                return;
+            }
 
+            // Doing anything else stops a harvest in progress.
+            _harvest.CancelFor(playerId, "You stop gathering.");
+
+            // ── NPCs ──
+            if (target is NpcEntity npc)
+                _shops.TryOpen(peer, npc);
+
+            var luaPlayer = _playerManager.CreateLuaPlayer(peer);
             if (luaPlayer == null)
             {
-                Logger.Warn(
-                    $"[Interact] FAILED: CreateLuaPlayer returned null");
+                Logger.Warn("[Interact] CreateLuaPlayer returned null");
                 return;
             }
 
-            Logger.Info(
-                $"[Interact] FIRING OnInteract: TemplateId={target.TemplateId}, Kind={target.Kind}");
-
-            playerManager.FireInteractEvent(luaPlayer, target);
-
-            Logger.Info(
-                $"[Interact] OnInteract finished");
-
+            _playerManager.FireInteractEvent(luaPlayer, target);
         }
     }
 }

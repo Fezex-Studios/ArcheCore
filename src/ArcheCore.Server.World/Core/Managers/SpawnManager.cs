@@ -1,11 +1,13 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using ArcheCore.Server.World.Core.Entities;
 using ArcheCore.Server.World.GameData.Npcs;
 using ArcheCore.Server.World.GameData.World.Spawners;
+using ArcheCore.Server.World.Networking.W2C;
 using ArcheCore.Server.World.Utils.Database.SQLite;
+using LiteNetLib;
 using Microsoft.EntityFrameworkCore;
 using NLog;
 
@@ -65,6 +67,10 @@ public class SpawnManager
     private int _nextId = NpcIdBase;
 
     private readonly Dictionary<int, SpawnerRuntime> _spawners = new();
+
+    // Other kinds of non-player entity sharing the grid (harvest nodes...).
+    // See IWorldEntitySource.
+    private readonly List<IWorldEntitySource> _entitySources = new();
 
     // Reused across ScanSpawners' per-spawner proximity checks - safe as a
     // single field because ScanSpawners runs synchronously on one thread
@@ -210,6 +216,40 @@ public class SpawnManager
     }
 
     public bool TryGetNpc(int networkId, out NpcEntity npc) => _npcSpawner.TryGet(networkId, out npc);
+
+    /// <summary>
+    /// Hands out an id from the NPC range for any non-player entity. One
+    /// counter for NPCs AND everything else, so ids can never collide and
+    /// IsNpcId ("not a player") stays true for all of them.
+    /// </summary>
+    public int AllocateNetworkId() => _nextId++;
+
+    /// <summary>Register another kind of grid entity (see IWorldEntitySource).</summary>
+    public void RegisterEntitySource(IWorldEntitySource source) => _entitySources.Add(source);
+
+    /// <summary>
+    /// A non-player entity just came into peer's view: send whatever spawn
+    /// packet it needs. Replaces the "TryGetNpc then W2CSpawnNpc" pair that
+    /// used to be written out at each call site, so new entity kinds don't
+    /// need those call sites edited again. Returns false for an id nobody
+    /// owns any more (despawned since the grid update) - nothing is sent.
+    /// </summary>
+    public bool TrySendSpawnTo(ReplicationManager replication, NetPeer peer, int networkId)
+    {
+        if (_npcSpawner.TryGet(networkId, out var npc))
+        {
+            W2CSpawnNpcPacketSender.Send(replication, peer, npc);
+            return true;
+        }
+
+        for (int i = 0; i < _entitySources.Count; i++)
+        {
+            if (_entitySources[i].TrySendSpawn(peer, networkId))
+                return true;
+        }
+
+        return false;
+    }
 
     public IEnumerable<NpcEntity> AllLiveNpcs => _npcSpawner.AllLive;
 

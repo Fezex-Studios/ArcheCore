@@ -106,12 +106,11 @@ namespace ArcheCore.Server.World.Managers
 
             foreach (var otherId in entered)
             {
-                // NPCs already active nearby - tell the mover about them,
-                // but there's no NPC peer to tell about the mover.
+                // NPCs, harvest nodes, anything non-player nearby - tell the
+                // mover about it; there's no peer to tell about the mover.
                 if (SpawnManager.IsNpcId(otherId))
                 {
-                    if (_spawnManager.TryGetNpc(otherId, out var npc))
-                        W2CSpawnNpcPacketSender.Send(_replication, sender, npc);
+                    _spawnManager.TrySendSpawnTo(_replication, sender, otherId);
                     continue;
                 }
 

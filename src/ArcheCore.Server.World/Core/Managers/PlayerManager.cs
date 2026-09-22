@@ -215,6 +215,20 @@ namespace ArcheCore.Server.World.Managers
             _luaEngine.FireEvent(PlayerEvent.OnInteract, player, target.TemplateId, (int)target.Kind);
         }
 
+        /// <summary>
+        /// PlayerEvent.OnHarvest(player, nodeTemplateId, itemTemplateId, quantity).
+        /// Fired after the item is already in the inventory. This is the
+        /// "collect" hook roadmap L's quest wiring will listen to.
+        /// </summary>
+        public void FireHarvestEvent(NetPeer peer, int nodeTemplateId, int itemTemplateId, int quantity)
+        {
+            var player = CreateLuaPlayer(peer);
+            if (player == null)
+                return;
+
+            _luaEngine.FireEvent(PlayerEvent.OnHarvest, player, nodeTemplateId, itemTemplateId, quantity);
+        }
+
         public int LevelUp(NetPeer peer)
         {
             if (!TryGetSession(peer, out var session) || session.NetworkId == null) return -1;
@@ -232,10 +246,13 @@ namespace ArcheCore.Server.World.Managers
             if (!TryGetSession(peer, out var session) || session.NetworkId == null)
                 return false;
 
-            if (delta < 0 && session.Gold + delta < 0)
+            // long, so neither direction can wrap: a big sale can't overflow
+            // to negative, and a big purchase can't underflow to positive.
+            long result = (long)session.Gold + delta;
+            if (result < 0 || result > int.MaxValue)
                 return false;
 
-            session.Gold += delta;
+            session.Gold = (int)result;
             W2CGoldUpdatePacketSender.Send(peer, session.Gold);
             return true;
         }
@@ -307,6 +324,67 @@ namespace ArcheCore.Server.World.Managers
             }
 
             return false; // full
+        }
+
+        /// <summary>
+        /// Would TryAddItem(itemTemplateId, quantity) succeed right now?
+        /// Same stacking rules, changes nothing. Shops and harvesting check
+        /// this BEFORE taking gold or claiming a node, so a full inventory
+        /// is refused up front instead of half-completing a transaction.
+        /// </summary>
+        public bool CanAddItem(NetPeer peer, int itemTemplateId, int quantity)
+        {
+            if (!TryGetSession(peer, out var session) || session.NetworkId == null)
+                return false;
+
+            if (itemTemplateId <= 0 || quantity <= 0 || !_items.Exists(itemTemplateId))
+                return false;
+
+            foreach (var slot in session.Inventory)
+            {
+                if (slot.ItemTemplateId == itemTemplateId && (long)slot.Quantity + quantity <= int.MaxValue)
+                    return true;
+            }
+
+            foreach (var slot in session.Inventory)
+            {
+                if (slot.ItemTemplateId == 0)
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Takes up to quantity items out of one slot (quantity &lt;= 0 means
+        /// the whole stack) and reports what was taken. The public face of
+        /// the same removal code drop and consume use, for callers that pay
+        /// for what they remove - selling to a shop.
+        /// </summary>
+        public bool TryTakeFromSlot(NetPeer peer, int slot, int quantity, out int itemTemplateId, out int removed)
+        {
+            itemTemplateId = 0;
+            removed = 0;
+
+            if (!TryGetSession(peer, out var session) || session.NetworkId == null)
+                return false;
+
+            return TryRemoveFromSlot(session, peer, slot, quantity, out itemTemplateId, out removed);
+        }
+
+        /// <summary>What's in a slot, without changing it. False for a bad index.</summary>
+        public bool TryPeekSlot(NetPeer peer, int slot, out InventorySlot contents)
+        {
+            contents = default;
+
+            if (!TryGetSession(peer, out var session) || session.NetworkId == null)
+                return false;
+
+            if (slot < 0 || slot >= session.Inventory.Length)
+                return false;
+
+            contents = session.Inventory[slot];
+            return true;
         }
 
         /// <summary>

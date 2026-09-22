@@ -8,4 +8,9 @@ public class DatabaseConfig
     public string User { get; set; } = string.Empty;
     public string Password { get; set; } = string.Empty;
     public string WorldDb { get; set; } = string.Empty;
+    /// <summary>
+    /// Where GameDataPatchRunner reads *.sql patches from. Relative paths are
+    /// relative to the server .exe. Empty = SQL/patches next to the .exe.
+    /// </summary>
+    public string PatchDirectory { get; set; } = "";
 }

@@ -1,6 +1,8 @@
-﻿using ArcheCore.Server.World.GameData.Items;
+using ArcheCore.Server.World.GameData.Harvest;
+using ArcheCore.Server.World.GameData.Items;
 using ArcheCore.Server.World.GameData.Npcs;
 using ArcheCore.Server.World.GameData.Quests;
+using ArcheCore.Server.World.GameData.Shops;
 using ArcheCore.Server.World.GameData.TestTable;
 using ArcheCore.Server.World.GameData.World.PlayerSpawn;
 using Microsoft.EntityFrameworkCore;
@@ -22,4 +24,12 @@ public class WorldDataDbContext : DbContext
     public DbSet<ItemRarity>  ItemRarities => Set<ItemRarity>();
     public DbSet<ItemTable>       Items      => Set<ItemTable>();
     public DbSet<SpawnPointTable> SpawnPointTables => Set<SpawnPointTable>();
+
+    // Harvesting (roadmap E)
+    public DbSet<HarvestNodeTemplate> HarvestNodeTemplates => Set<HarvestNodeTemplate>();
+    public DbSet<HarvestNodeSpawn>    HarvestNodeSpawns    => Set<HarvestNodeSpawn>();
+
+    // NPC shops (roadmap F)
+    public DbSet<ShopTemplate> Shops     => Set<ShopTemplate>();
+    public DbSet<ShopItem>     ShopItems => Set<ShopItem>();
 }

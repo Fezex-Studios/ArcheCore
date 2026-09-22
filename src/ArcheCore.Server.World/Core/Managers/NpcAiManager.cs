@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Numerics;
 using ArcheCore.Server.World.Core.Entities;
@@ -232,6 +232,17 @@ namespace ArcheCore.Server.World.Managers
 
             foreach (var npc in spawned)
             {
+                // Stationary NPCs (merchants, quest givers) are replicated
+                // exactly like any other NPC but never enter the wander AI,
+                // so they stay where the spawner put them. Despawn still
+                // works: ApplyDeactivate removes by id whether or not the
+                // NPC was ever in _active.
+                if (npc.IsStationary)
+                {
+                    BroadcastSpawnToNearbyPlayers(npc);
+                    continue;
+                }
+
                 _active[npc.NetworkId] = new NpcAiState
                 {
                     NetworkId = npc.NetworkId,

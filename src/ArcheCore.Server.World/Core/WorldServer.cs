@@ -1,4 +1,4 @@
-﻿using ArcheCore.Library.Net.Worldserver;
+using ArcheCore.Library.Net.Worldserver;
 using ArcheCore.Network.Client;
 using ArcheCore.Network.Worldserver;
 using ArcheCore.Server.World.Core.Services;
@@ -41,6 +41,8 @@ public class WorldServer : IHostedService, INetEventListener
     private InteractionRegistry _interactions;
     private InterestManager _interestManager;
     private NpcAiManager _npcAiManager;
+    private HarvestManager _harvestManager;
+    private ShopManager _shopManager;
     private CancellationTokenSource _tickCts;
     private Task _tickLoop;
     private PersistenceClient _persistenceClient;
@@ -96,6 +98,13 @@ public class WorldServer : IHostedService, INetEventListener
         await using var db = await _dbFactory.CreateDbContextAsync();
         await db.Database.MigrateAsync();
 
+        // 0c. Apply SQL data patches (SQL/patches/*.sql, each once, in
+        //     name order, tracked in schema_versions). After migrations, so
+        //     a patch can always rely on the tables it fills existing.
+        //     GameDataPatchRunner was constructed and injected before but
+        //     never actually called - this is the call.
+        await _dataPatchRunner.RunAsync();
+
         // 1. Connect to PersistenceServer
         _persistenceClient = new PersistenceClient(_world);
         await _persistenceClient.Start();
@@ -142,6 +151,13 @@ public class WorldServer : IHostedService, INetEventListener
         _itemManager.LoadFromDatabase();
         await _spawnPoints.LoadAsync();
 
+        // Both check their item ids against ItemManager, so they load after it.
+        _harvestManager = new HarvestManager(
+            _dbFactory, _interactions, _interestManager, _spawnManager,
+            _itemManager, _playerManager, _replicationManager);
+        _shopManager = new ShopManager(_dbFactory, _itemManager, _playerManager, _spawnManager);
+        _shopManager.LoadFromDatabase();
+
         // 4. Register packets
         _packetDispatcher = new PacketDispatcher();
         RegisterPackets();
@@ -156,6 +172,10 @@ public class WorldServer : IHostedService, INetEventListener
 
         // 6. Load NPC spawner definitions (all dormant until a player is near).
         _spawnManager.LoadSpawnerDefinitions();
+
+        // 6b. Place every harvest node in the interest grid. Before the tick
+        //     loop starts, so the boot thread is the only one touching it.
+        _harvestManager.LoadAndSpawnAll();
 
         // 7. Services
         await _demoService.RunService();
@@ -196,6 +216,9 @@ public class WorldServer : IHostedService, INetEventListener
 
                     // NPC wander AI + spawner activation (internally rate-limited).
                     _npcAiManager.Tick();
+
+                    // Harvest timers, move-to-cancel, node respawns.
+                    _harvestManager.Tick();
 
                     // Spread-out periodic saves of dirty characters.
                     _playerManager.RunAutosave(tick);
@@ -269,7 +292,8 @@ public class WorldServer : IHostedService, INetEventListener
         services.Register(_itemManager);
         services.Register(_world);
         services.Register(_playerManager.Jumps);
-        services.Register(_world);
+        services.Register(_harvestManager);
+        services.Register(_shopManager);
 
         _packetDispatcher.AutoRegister(services.Resolve, typeof(WorldServer).Assembly);
     }

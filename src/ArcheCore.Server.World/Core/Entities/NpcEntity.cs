@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using ArcheCore.Server.World.Core.Interaction;
 
 namespace ArcheCore.Server.World.Core.Entities;
@@ -21,6 +21,9 @@ public class NpcEntity : IInteractable
 
     /// <summary>Which spawner produced this NPC - needed so despawn can tell the spawner one of its group died/left, and so the AI tick can skip NPCs that were placed by a GM command rather than a spawner.</summary>
     public int        SpawnerId     { get; set; }
+
+    /// <summary>Copied from NpcTemplate.IsStationary. Stationary NPCs never enter the wander AI.</summary>
+    public bool       IsStationary  { get; set; }
 
     public InteractableKind Kind => InteractableKind.Npc;
 }
