@@ -48,6 +48,21 @@
         C2WDropItem             = 40, // C2W: destroy all or part of one slot - see PlayerManager.TryDropItem
         C2WUseItem              = 41, // C2W: use one slot - ItemUse row decides effect/consume/cooldown, see PlayerManager.TryUseItem
         W2CItemCooldown         = 42, // W2C: a cooldown group started - which item ids it covers and for how long
+        
+        // --- Harvesting (roadmap E) ---
+        W2CSpawnHarvestNode     = 43, // W2C: a harvest node came into view - template, model, position, depleted or not
+        W2CHarvestNodeState     = 44, // W2C: a node you can see was depleted or respawned
+        W2CHarvestStarted       = 45, // W2C: your harvest began - show the progress bar for DurationMs
+        W2CHarvestCompleted     = 46, // W2C: your harvest finished - what you got
+        W2CHarvestCancelled     = 47, // W2C: your harvest stopped early - moved, inventory full, node gone
 
+        // --- NPC shops (roadmap F) ---
+        W2CShopOpen             = 48, // W2C: the full buy/sell list for the merchant you interacted with
+        C2WShopBuy              = 49, // C2W: buy N of an item from a merchant
+        C2WShopSell             = 50, // C2W: sell N from an inventory slot to a merchant
+        W2CShopResult           = 51, // W2C: success/failure message for a buy or sell
+        
+        
+        
     }
 }

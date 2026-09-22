@@ -228,10 +228,10 @@ namespace ArcheCore.Server.World.Managers
 
             foreach (var otherId in entered)
             {
+                // NPCs, harvest nodes, anything non-player already here.
                 if (SpawnManager.IsNpcId(otherId))
                 {
-                    if (_worldSpawnManager.TryGetNpc(otherId, out var npc))
-                        W2CSpawnNpcPacketSender.Send(_replication, peer, npc);
+                    _worldSpawnManager.TrySendSpawnTo(_replication, peer, otherId);
                     continue;
                 }
 

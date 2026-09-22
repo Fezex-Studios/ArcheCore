@@ -17,7 +17,12 @@ public class GameDataPatchRunner
         _connectionString = $"Data Source={worldDb}";
 
         // SQL/patches/ sits next to the .exe in the output dir
-        _patchDir = Path.Combine(AppContext.BaseDirectory, "SQL", "patches");
+        var configured = dbConfig.Value.PatchDirectory;
+        _patchDir = string.IsNullOrWhiteSpace(configured)
+            ? Path.Combine(AppContext.BaseDirectory, "SQL", "patches")
+            : Path.GetFullPath(configured, AppContext.BaseDirectory);
+
+        Logger.Info($"[Patcher] Reading patches from {_patchDir}");
     }
 
     public async Task RunAsync()

@@ -2,6 +2,7 @@
 using ArcheCore.Server.World.Utils.Database.SQLite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -9,9 +10,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ArcheCore.Server.World.Migrations
 {
     [DbContext(typeof(WorldDataDbContext))]
-    partial class WorldDataDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260921155537_AddHarvestNodesAndShops")]
+    partial class AddHarvestNodesAndShops
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.0");
@@ -148,9 +151,6 @@ namespace ArcheCore.Server.World.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
-                    b.Property<int>("category_id")
-                        .HasColumnType("INTEGER");
-
                     b.Property<string>("description")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -162,12 +162,6 @@ namespace ArcheCore.Server.World.Migrations
                     b.Property<string>("name")
                         .IsRequired()
                         .HasColumnType("TEXT");
-
-                    b.Property<int>("rarity_id")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("required_level")
-                        .HasColumnType("INTEGER");
 
                     b.HasKey("item_id");
 

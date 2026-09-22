@@ -1,4 +1,4 @@
-namespace ArcheCore.Server.World.Lua.Scripting
+﻿namespace ArcheCore.Server.World.Lua.Scripting
 {
     /// <summary>
     /// Event IDs Lua scripts can hook via Server:RegisterPlayerEvent(id, fn).
@@ -14,5 +14,6 @@ namespace ArcheCore.Server.World.Lua.Scripting
         OnDeath      = 5,
         OnInteract   = 6,
         OnItemUse    = 7, // (player, itemTemplateId, slot) - fired AFTER a successful use, see PlayerManager.TryUseItem
+        OnHarvest    = 8, // (player, nodeTemplateId, itemTemplateId, quantity) - after a successful harvest, see HarvestManager
     }
 }

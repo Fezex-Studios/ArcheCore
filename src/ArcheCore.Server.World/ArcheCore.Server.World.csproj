@@ -79,7 +79,7 @@
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
         <None Update="worldserver.db">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+          <CopyToOutputDirectory>Never</CopyToOutputDirectory>
         </None>
     </ItemGroup>
 
