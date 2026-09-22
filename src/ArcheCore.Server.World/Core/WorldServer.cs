@@ -1,3 +1,4 @@
+using ArcheCore.Server.World.Core.Interaction;
 using ArcheCore.Library.Net.Worldserver;
 using ArcheCore.Network.Client;
 using ArcheCore.Network.Worldserver;
@@ -43,6 +44,9 @@ public class WorldServer : IHostedService, INetEventListener
     private NpcAiManager _npcAiManager;
     private HarvestManager _harvestManager;
     private ShopManager _shopManager;
+    private LootManager _lootManager;
+    private InteractionActionCatalog _interactionActions;
+    private CombatManager _combatManager;
     private CancellationTokenSource _tickCts;
     private Task _tickLoop;
     private PersistenceClient _persistenceClient;
@@ -151,12 +155,27 @@ public class WorldServer : IHostedService, INetEventListener
         _itemManager.LoadFromDatabase();
         await _spawnPoints.LoadAsync();
 
+        // F/G actions for every interactable. Loaded before anything can
+        // spawn, because every spawn packet carries its object's actions.
+        _interactionActions = new InteractionActionCatalog(_dbFactory);
+        _interactionActions.LoadFromDatabase();
+
         // Both check their item ids against ItemManager, so they load after it.
         _harvestManager = new HarvestManager(
             _dbFactory, _interactions, _interestManager, _spawnManager,
             _itemManager, _playerManager, _replicationManager);
         _shopManager = new ShopManager(_dbFactory, _itemManager, _playerManager, _spawnManager);
         _shopManager.LoadFromDatabase();
+
+        // Combat needs the NPC AI (deaths/respawns) and loot (corpses).
+        _lootManager = new LootManager(
+            _dbFactory, _itemManager, _playerManager, _spawnManager,
+            _interestManager, _interactions, _replicationManager);
+        _lootManager.LoadFromDatabase();
+        _combatManager = new CombatManager(
+            _dbFactory, _playerManager, _spawnManager, _npcAiManager,
+            _lootManager, _interestManager, _replicationManager);
+        _combatManager.LoadFromDatabase();
 
         // 4. Register packets
         _packetDispatcher = new PacketDispatcher();
@@ -219,6 +238,9 @@ public class WorldServer : IHostedService, INetEventListener
 
                     // Harvest timers, move-to-cancel, node respawns.
                     _harvestManager.Tick();
+
+                    // Corpse expiry.
+                    _lootManager.Tick();
 
                     // Spread-out periodic saves of dirty characters.
                     _playerManager.RunAutosave(tick);
@@ -294,6 +316,9 @@ public class WorldServer : IHostedService, INetEventListener
         services.Register(_playerManager.Jumps);
         services.Register(_harvestManager);
         services.Register(_shopManager);
+        services.Register(_lootManager);
+        services.Register(_interactionActions);
+        services.Register(_combatManager);
 
         _packetDispatcher.AutoRegister(services.Resolve, typeof(WorldServer).Assembly);
     }

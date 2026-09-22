@@ -23,5 +23,9 @@ namespace ArcheCore.Network.Shared.Packets.W2C
         public CharacterData Character;
         public int Gold;
         public InventorySlotData[] Inventory;
+
+        /// <summary>Your health on entering the world (full, for now - health isn't saved yet).</summary>
+        public int Health;
+        public int MaxHealth;
     }
 }

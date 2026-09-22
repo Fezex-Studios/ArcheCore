@@ -25,5 +25,9 @@ namespace ArcheCore.Network.Shared.Packets.W2C
         public float  Yaw;           // degrees
         public float  InteractRange;
         public bool   IsDepleted;
+
+        /// <summary>What F / G do on this object, in slot order (index 0 = F, 1 = G).
+        /// From the server's InteractableActions table.</summary>
+        public InteractionActionData[] Actions;
     }
 }

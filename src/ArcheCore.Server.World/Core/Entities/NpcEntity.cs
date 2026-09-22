@@ -25,5 +25,21 @@ public class NpcEntity : IInteractable
     /// <summary>Copied from NpcTemplate.IsStationary. Stationary NPCs never enter the wander AI.</summary>
     public bool       IsStationary  { get; set; }
 
+    // ── Combat (roadmap G) ──
+    // On the entity rather than NpcAiState: stationary NPCs never get an AI
+    // state, but still need to know whether they can be attacked.
+
+    /// <summary>0 = can't be attacked.</summary>
+    public int        MaxHealth      { get; set; }
+    public int        Health         { get; set; }
+    public bool       IsAttackable   => MaxHealth > 0;
+    public bool       IsDead         => IsAttackable && Health <= 0;
+
+    public int        LootTableId    { get; set; }
+    public int        RespawnSeconds { get; set; }
+
+    public string     Title          { get; set; } = string.Empty;
+    public string     Greeting       { get; set; } = string.Empty;
+
     public InteractableKind Kind => InteractableKind.Npc;
 }

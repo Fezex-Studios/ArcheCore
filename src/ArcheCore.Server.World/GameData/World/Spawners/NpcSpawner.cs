@@ -38,6 +38,12 @@ public class NpcSpawner(InteractionRegistry interactions)
             ModelType     = template.ModelType,
             InteractRange = template.InteractRange,
             IsStationary  = template.IsStationary,
+            MaxHealth     = template.MaxHealth,
+            Health        = template.MaxHealth,
+            LootTableId   = template.LootTableId,
+            RespawnSeconds = template.RespawnSeconds,
+            Title         = template.Title ?? string.Empty,
+            Greeting      = template.Greeting ?? string.Empty,
             Position      = position,
             SpawnOrigin   = position
         };

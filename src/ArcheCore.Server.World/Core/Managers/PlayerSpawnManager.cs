@@ -151,6 +151,10 @@ namespace ArcheCore.Server.World.Managers
             session.CharacterId = character.CharacterId;
             session.Name = character.Name;
             session.Level = character.Level;
+
+            // Health isn't saved yet - everyone enters the world at full.
+            session.MaxHealth = ArcheCore.Server.World.Core.Combat.HealthRules.PlayerMaxHealth(session.Level);
+            session.Health = session.MaxHealth;
             session.Gold = character.Gold;
 
             // Rebuild the dense 20-slot array from the persistence
@@ -222,7 +226,9 @@ namespace ArcheCore.Server.World.Managers
                 peer,
                 new CharacterData { Level = session.Level, Name = session.Name },
                 session.Gold,
-                session.Inventory);
+                session.Inventory,
+                session.Health,
+                session.MaxHealth);
 
             var (entered, _) = _interest.UpdatePosition(networkId, spawn);
 

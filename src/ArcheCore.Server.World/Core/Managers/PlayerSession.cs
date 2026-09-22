@@ -72,6 +72,20 @@ namespace ArcheCore.Server.World.Managers
         /// </summary>
         public readonly Dictionary<int, long> ItemCooldowns = new();
 
+        // ── Combat (roadmap G/H) ──
+
+        /// <summary>
+        /// Current and max health. Not persisted: set to full from
+        /// HealthRules.PlayerMaxHealth(Level) at spawn. Changed only through
+        /// PlayerManager (heals, level-ups) and CombatManager (damage, J).
+        /// </summary>
+        public int Health;
+        public int MaxHealth;
+        public bool IsDead => MaxHealth > 0 && Health <= 0;
+
+        /// <summary>Skill id -> Environment.TickCount64 when it's ready again.</summary>
+        public readonly Dictionary<int, long> SkillCooldowns = new();
+
         /// <summary>A select/create for this peer is already in flight or done.</summary>
         public bool     SpawnRequested;
 

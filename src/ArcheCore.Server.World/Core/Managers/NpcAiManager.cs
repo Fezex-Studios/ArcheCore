@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Numerics;
 using ArcheCore.Server.World.Core.Entities;
 using ArcheCore.Network.Shared;
@@ -77,6 +78,10 @@ namespace ArcheCore.Server.World.Managers
 
         private readonly ConcurrentDictionary<int, NpcAiState> _active = new();
 
+        // Dead NPCs waiting to be replaced: (spawner id, when). Tick thread only.
+        private readonly List<(int SpawnerId, DateTime DueAt)> _respawns = new();
+        private static readonly TimeSpan DefaultRespawn = TimeSpan.FromSeconds(30);
+
         private DateTime _lastSpawnerScan = DateTime.MinValue;
         private DateTime _lastDecisionTick = DateTime.MinValue;
         private DateTime _lastMoveTick = DateTime.MinValue;
@@ -151,6 +156,9 @@ namespace ArcheCore.Server.World.Managers
             try
             {
                 var now = DateTime.UtcNow;
+
+                if (_respawns.Count > 0)
+                    RunRespawns(now);
 
                 if (now - _lastSpawnerScan >= SpawnerScanInterval)
                 {
@@ -231,26 +239,70 @@ namespace ArcheCore.Server.World.Managers
             var spawned = _spawnManager.ApplyActivate(spawnerId);
 
             foreach (var npc in spawned)
-            {
-                // Stationary NPCs (merchants, quest givers) are replicated
-                // exactly like any other NPC but never enter the wander AI,
-                // so they stay where the spawner put them. Despawn still
-                // works: ApplyDeactivate removes by id whether or not the
-                // NPC was ever in _active.
-                if (npc.IsStationary)
-                {
-                    BroadcastSpawnToNearbyPlayers(npc);
-                    continue;
-                }
+                StartNpc(npc);
+        }
 
+        /// <summary>
+        /// Brings one freshly spawned NPC to life: into the wander AI (unless
+        /// stationary) and in front of every player nearby. Shared by spawner
+        /// activation and single respawns after a death.
+        /// </summary>
+        private void StartNpc(NpcEntity npc)
+        {
+            // Stationary NPCs (merchants, quest givers) are replicated
+            // exactly like any other NPC but never enter the wander AI, so
+            // they stay where the spawner put them. Despawn still works:
+            // removal is by id whether or not the NPC was ever in _active.
+            if (!npc.IsStationary)
+            {
                 _active[npc.NetworkId] = new NpcAiState
                 {
                     NetworkId = npc.NetworkId,
                     SpawnOrigin = npc.SpawnOrigin,
                     CurrentPosition = npc.Position
                 };
+            }
 
-                BroadcastSpawnToNearbyPlayers(npc);
+            BroadcastSpawnToNearbyPlayers(npc);
+        }
+
+        // --- Death (roadmap H/I) ---
+
+        /// <summary>
+        /// An NPC was killed. Tick thread only - CombatManager calls it from
+        /// a packet handler, which runs in the tick. Removes it through the
+        /// same choke point as every other NPC despawn (interest, snapshot
+        /// store, W2CNpcDespawn to everyone who could see it), then queues a
+        /// replacement for its spawner.
+        ///
+        /// Call AFTER broadcasting the killing blow - this empties the
+        /// NPC's observer list.
+        /// </summary>
+        public void KillNpc(NpcEntity npc)
+        {
+            _active.TryRemove(npc.NetworkId, out _);
+            RemoveNpcInterest(npc.NetworkId);
+            _spawnManager.ApplyDespawnSingle(npc);
+
+            var delay = npc.RespawnSeconds > 0 ? TimeSpan.FromSeconds(npc.RespawnSeconds) : DefaultRespawn;
+            _respawns.Add((npc.SpawnerId, DateTime.UtcNow + delay));
+        }
+
+        private void RunRespawns(DateTime now)
+        {
+            for (int i = _respawns.Count - 1; i >= 0; i--)
+            {
+                if (now < _respawns[i].DueAt)
+                    continue;
+
+                int spawnerId = _respawns[i].SpawnerId;
+                _respawns.RemoveAt(i);
+
+                // Null when the spawner went inactive meanwhile (no players
+                // around) - its next activation refills the whole group.
+                var npc = _spawnManager.ApplyRespawnOne(spawnerId);
+                if (npc != null)
+                    StartNpc(npc);
             }
         }
 
