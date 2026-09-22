@@ -216,6 +216,19 @@ namespace ArcheCore.Server.World.Managers
         }
 
         /// <summary>
+        /// PlayerEvent.OnKill(player, npcTemplateId), after the NPC has died.
+        /// The "kill" hook roadmap L's quest objectives will listen to.
+        /// </summary>
+        public void FireKillEvent(NetPeer peer, int npcTemplateId)
+        {
+            var player = CreateLuaPlayer(peer);
+            if (player == null)
+                return;
+
+            _luaEngine.FireEvent(PlayerEvent.OnKill, player, npcTemplateId);
+        }
+
+        /// <summary>
         /// PlayerEvent.OnHarvest(player, nodeTemplateId, itemTemplateId, quantity).
         /// Fired after the item is already in the inventory. This is the
         /// "collect" hook roadmap L's quest wiring will listen to.
@@ -233,6 +246,11 @@ namespace ArcheCore.Server.World.Managers
         {
             if (!TryGetSession(peer, out var session) || session.NetworkId == null) return -1;
             session.Level += 1;
+
+            // A level-up raises max health and refills it, MMO-style.
+            session.MaxHealth = ArcheCore.Server.World.Core.Combat.HealthRules.PlayerMaxHealth(session.Level);
+            session.Health = session.MaxHealth;
+            W2CHealthUpdatePacketSender.Send(peer, session.Health, session.MaxHealth);
             _persistence.SaveInBackground(session);
             return session.Level;
         }
@@ -514,7 +532,7 @@ namespace ArcheCore.Server.World.Managers
             if (player == null)
                 return false;
 
-            if (!TryApplyItemEffect(session, use))
+            if (!TryApplyItemEffect(peer, session, use))
                 return false;
 
             // 5
@@ -546,7 +564,7 @@ namespace ArcheCore.Server.World.Managers
         ///   ApplyBuff - with the buff system.
         ///   CastSkill - roadmap H.
         /// </summary>
-        private bool TryApplyItemEffect(PlayerSession session, ItemUse use)
+        private bool TryApplyItemEffect(NetPeer peer, PlayerSession session, ItemUse use)
         {
             switch (use.EffectType)
             {
@@ -554,7 +572,20 @@ namespace ArcheCore.Server.World.Managers
                     return true; // Lua does the work in OnItemUse
 
                 case ItemEffectType.Heal:
-                    Logger.Info($"[UseItem] STUB Heal {use.EffectValue} for account {session.AccountId} - no health yet (roadmap G)");
+                    // Refused at full health, so a potion is never wasted -
+                    // returning false here means it isn't consumed and its
+                    // cooldown doesn't start.
+                    if (session.IsDead)
+                        return false;
+
+                    if (session.Health >= session.MaxHealth)
+                    {
+                        W2CInteractDeniedPacketSender.Send(peer, "You are already at full health.");
+                        return false;
+                    }
+
+                    session.Health = System.Math.Min(session.MaxHealth, session.Health + System.Math.Max(0, use.EffectValue));
+                    W2CHealthUpdatePacketSender.Send(peer, session.Health, session.MaxHealth);
                     return true;
 
                 case ItemEffectType.ApplyBuff:

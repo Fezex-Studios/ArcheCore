@@ -215,6 +215,36 @@ public class SpawnManager
         _npcSpawner.DespawnNpc(npc.NetworkId);
     }
 
+    /// <summary>
+    /// Main-thread only. Replaces ONE NPC in an active spawner that's below
+    /// its Count (one died). Returns null if the spawner is inactive or
+    /// already full - an inactive spawner refills its whole group on its
+    /// next activation anyway.
+    /// </summary>
+    public NpcEntity ApplyRespawnOne(int spawnerId)
+    {
+        if (!_spawners.TryGetValue(spawnerId, out var runtime) || !runtime.IsActive)
+            return null;
+
+        if (runtime.LiveNpcIds.Count >= runtime.Record.Count)
+            return null;
+
+        int networkId = _nextId++;
+
+        double angle = _rng.NextDouble() * Math.PI * 2;
+        double dist  = _rng.NextDouble() * runtime.Record.Radius;
+        var pos = new Vector3(
+            runtime.Record.X + (float)(Math.Cos(angle) * dist),
+            runtime.Record.Y,
+            runtime.Record.Z + (float)(Math.Sin(angle) * dist));
+
+        var npc = _npcSpawner.SpawnFromTemplate(networkId, runtime.Record.Id, runtime.Template, pos);
+        runtime.LiveNpcIds.Add(networkId);
+
+        Logger.Info($"Spawner {runtime.Record.Id} respawned a '{runtime.Template.Name}' ({runtime.LiveNpcIds.Count}/{runtime.Record.Count}).");
+        return npc;
+    }
+
     public bool TryGetNpc(int networkId, out NpcEntity npc) => _npcSpawner.TryGet(networkId, out npc);
 
     /// <summary>

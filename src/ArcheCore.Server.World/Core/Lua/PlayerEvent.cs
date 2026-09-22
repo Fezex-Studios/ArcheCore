@@ -15,5 +15,6 @@
         OnInteract   = 6,
         OnItemUse    = 7, // (player, itemTemplateId, slot) - fired AFTER a successful use, see PlayerManager.TryUseItem
         OnHarvest    = 8, // (player, nodeTemplateId, itemTemplateId, quantity) - after a successful harvest, see HarvestManager
+        OnKill       = 9, // (player, npcTemplateId) - after an NPC the player attacked dies, see CombatManager
     }
 }

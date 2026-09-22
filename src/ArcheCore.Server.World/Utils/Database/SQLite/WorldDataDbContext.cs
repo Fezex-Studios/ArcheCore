@@ -1,5 +1,8 @@
+using ArcheCore.Server.World.GameData.Combat;
 using ArcheCore.Server.World.GameData.Harvest;
+using ArcheCore.Server.World.GameData.Interaction;
 using ArcheCore.Server.World.GameData.Items;
+using ArcheCore.Server.World.GameData.Loot;
 using ArcheCore.Server.World.GameData.Npcs;
 using ArcheCore.Server.World.GameData.Quests;
 using ArcheCore.Server.World.GameData.Shops;
@@ -32,4 +35,12 @@ public class WorldDataDbContext : DbContext
     // NPC shops (roadmap F)
     public DbSet<ShopTemplate> Shops     => Set<ShopTemplate>();
     public DbSet<ShopItem>     ShopItems => Set<ShopItem>();
+
+    // Combat and loot (roadmap H/I)
+    public DbSet<SkillTemplate>  Skills           => Set<SkillTemplate>();
+    public DbSet<LootTable>      LootTables       => Set<LootTable>();
+    public DbSet<LootTableEntry> LootTableEntries => Set<LootTableEntry>();
+
+    // Interaction actions (F/G) for every interactable
+    public DbSet<InteractableAction> InteractableActions => Set<InteractableAction>();
 }

@@ -2,6 +2,7 @@
 using ArcheCore.Server.World.Utils.Database.SQLite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -9,9 +10,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ArcheCore.Server.World.Migrations
 {
     [DbContext(typeof(WorldDataDbContext))]
-    partial class WorldDataDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260922080559_AddCombatandLoot")]
+    partial class AddCombatandLoot
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.0");
@@ -104,44 +107,6 @@ namespace ArcheCore.Server.World.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("HarvestNodeTemplates");
-                });
-
-            modelBuilder.Entity("ArcheCore.Server.World.GameData.Interaction.InteractableAction", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("ActionType")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("CursorName")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("IconName")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("IsEnabled")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("Label")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("Slot")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("TargetKind")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("TemplateId")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("InteractableActions");
                 });
 
             modelBuilder.Entity("ArcheCore.Server.World.GameData.Items.ItemCategory", b =>
@@ -350,10 +315,6 @@ namespace ArcheCore.Server.World.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("Greeting")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
                     b.Property<float>("InteractRange")
                         .HasColumnType("REAL");
 
@@ -379,10 +340,6 @@ namespace ArcheCore.Server.World.Migrations
 
                     b.Property<int>("RespawnSeconds")
                         .HasColumnType("INTEGER");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 

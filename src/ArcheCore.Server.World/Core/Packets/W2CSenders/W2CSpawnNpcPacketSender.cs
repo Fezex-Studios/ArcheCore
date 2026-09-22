@@ -1,7 +1,8 @@
-﻿using ArcheCore.Library.Net.Worldserver;
+using ArcheCore.Library.Net.Worldserver;
 using ArcheCore.Network.Shared.Packets.W2C;
 using ArcheCore.Server.World.Core.Entities;
 using ArcheCore.Server.World.Managers;
+using ArcheCore.Server.World.Core.Interaction;
 using LiteNetLib;
 using Shared;
 
@@ -26,7 +27,11 @@ namespace ArcheCore.Server.World.Networking.W2C
                     X             = npc.Position.X,
                     Y             = npc.Position.Y,
                     Z             = npc.Position.Z,
-                    InteractRange = npc.InteractRange
+                    InteractRange = npc.InteractRange,
+                    Health        = npc.Health,
+                    MaxHealth     = npc.MaxHealth,
+                    Title         = npc.Title,
+                    Actions       = InteractionActionCatalog.ActionsFor(InteractableKind.Npc, npc.TemplateId)
                 },
                 peer);
         }

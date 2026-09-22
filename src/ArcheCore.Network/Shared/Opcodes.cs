@@ -61,6 +61,21 @@
         C2WShopBuy              = 49, // C2W: buy N of an item from a merchant
         C2WShopSell             = 50, // C2W: sell N from an inventory slot to a merchant
         W2CShopResult           = 51, // W2C: success/failure message for a buy or sell
+
+        // --- Combat and loot (roadmap G/H/I) ---
+        C2WAttack               = 52, // C2W: use a skill on a target - server checks cooldown, range, target
+        W2CCombatEvent          = 53, // W2C: someone hit something - to everyone who can see the target
+        W2CHealthUpdate         = 54, // W2C: YOUR health changed (heal, level-up) - combat hits use W2CCombatEvent
+        W2CSpawnCorpse          = 55, // W2C: a lootable corpse came into view
+
+        // --- Interaction rework ---
+        W2CLootWindow           = 56, // W2C: a corpse's contents, for the loot window (sent on open and after every take)
+        C2WLootTake             = 57, // C2W: take one thing from a corpse (ItemTemplateId 0 = the gold)
+
+        // --- Death and respawn (roadmap J) ---
+        W2CPlayerDeath          = 58, // W2C: you died - who killed you
+        C2WRespawn              = 59, // C2W: the Respawn button
+        W2CRespawn              = 60, // W2C: where you came back, and your health
         
         
         
