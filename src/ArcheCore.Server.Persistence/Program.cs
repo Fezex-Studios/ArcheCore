@@ -200,7 +200,8 @@ app.MapPost("/characters/load", async (HttpContext context, PersistenceDbContext
             Y           = 0,
             Z           = 0,
             Gold        = 0,
-            Inventory   = Array.Empty<InventorySlotDto>()
+            Inventory   = Array.Empty<InventorySlotDto>(),
+            Quests      = Array.Empty<QuestStateDto>()
         });
         return;
     }
@@ -219,6 +220,17 @@ app.MapPost("/characters/load", async (HttpContext context, PersistenceDbContext
         })
         .ToArrayAsync();
 
+    var quests = await db.CharacterQuests
+        .AsNoTracking()
+        .Where(q => q.CharacterId == row.CharacterId)
+        .Select(q => new QuestStateDto
+        {
+            QuestId  = q.QuestId,
+            Status   = q.Status,
+            Progress = q.Progress
+        })
+        .ToArrayAsync();
+
     await context.Response.WriteMsgPackAsync(new P2WCharacterLoadResponse
     {
         Found       = true,
@@ -230,7 +242,8 @@ app.MapPost("/characters/load", async (HttpContext context, PersistenceDbContext
         Y           = row.PosY,
         Z           = row.PosZ,
         Gold        = row.Gold,
-        Inventory   = inventory
+        Inventory   = inventory,
+        Quests      = quests
     });
 });
 
@@ -368,6 +381,86 @@ app.MapPost("/characters/inventory/save", async (HttpContext context, Persistenc
         // has a bug, not this endpoint.
         Console.Error.WriteLine(
             $"[Persistence] Inventory save failed for CharacterId={request.CharacterId}: {e}");
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+    }
+});
+
+// ── /characters/quests/save ──────────────────────────────────────────
+//
+// Upsert the quests that changed for one character. Mirrors
+// /characters/inventory/save: ownership checked once up front, then one
+// transaction, and only what WorldServer says changed.
+//
+// Unlike inventory there are no deletes - a quest never stops having
+// happened. Abandoning drops it back to "not started", which is a status
+// of 0 and means the row goes away.
+app.MapPost("/characters/quests/save", async (HttpContext context, PersistenceDbContext db) =>
+{
+    var request = await context.Request.ReadMsgPackAsync<W2PQuestSaveRequest>();
+
+    if (request is null)
+    {
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        return;
+    }
+
+    if (request.Quests is null || request.Quests.Length == 0)
+        return; // nothing changed - a success, not an error
+
+    try
+    {
+        var owns = await db.Characters
+            .AsNoTracking()
+            .AnyAsync(c => c.CharacterId == request.CharacterId && c.AccountId == request.AccountId);
+
+        if (!owns)
+        {
+            Console.Error.WriteLine(
+                $"[Persistence] Quest save rejected: CharacterId={request.CharacterId} " +
+                $"not owned by AccountId={request.AccountId}.");
+            context.Response.StatusCode = StatusCodes.Status409Conflict;
+            return;
+        }
+
+        await using var tx = await db.Database.BeginTransactionAsync();
+
+        foreach (var change in request.Quests)
+        {
+            var existing = await db.CharacterQuests
+                .FirstOrDefaultAsync(q => q.CharacterId == request.CharacterId && q.QuestId == change.QuestId);
+
+            if (change.Status == 0)
+            {
+                // Abandoned: forget it entirely, so it can be taken again.
+                if (existing != null)
+                    db.CharacterQuests.Remove(existing);
+
+                continue;
+            }
+
+            if (existing is null)
+            {
+                db.CharacterQuests.Add(new CharacterQuest
+                {
+                    CharacterId = request.CharacterId,
+                    QuestId     = change.QuestId,
+                    Status      = change.Status,
+                    Progress    = change.Progress ?? string.Empty
+                });
+            }
+            else
+            {
+                existing.Status   = change.Status;
+                existing.Progress = change.Progress ?? string.Empty;
+            }
+        }
+
+        await db.SaveChangesAsync();
+        await tx.CommitAsync();
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[Persistence] Quest save failed for CharacterId={request.CharacterId}: {ex.Message}");
         context.Response.StatusCode = StatusCodes.Status500InternalServerError;
     }
 });

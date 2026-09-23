@@ -22,5 +22,12 @@ namespace ArcheCore.Network.Shared.Packets.PersistenceServer.P2W
         /// the dense 20-slot session.Inventory array from this on spawn.
         /// </summary>
         public InventorySlotDto[] Inventory;
+
+        /// <summary>
+        /// Quests this character has touched - accepted, finished, or handed
+        /// in. Never-seen quests simply have no row, the same way an empty
+        /// inventory slot has none.
+        /// </summary>
+        public QuestStateDto[] Quests;
     }
 }

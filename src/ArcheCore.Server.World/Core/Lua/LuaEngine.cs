@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using ArcheCore.Server.World.Lua.Scripting.Bindings;
@@ -102,8 +102,33 @@ namespace ArcheCore.Server.World.Lua.Scripting
         /// on the player-connect/disconnect/etc hot paths — no file path,
         /// no parsing, just calling already-resolved Lua functions.
         /// </summary>
+        /// <summary>
+        /// Raised for EVERY fired event, before the Lua hooks run, whether or
+        /// not any script is listening.
+        ///
+        /// This is how server systems (QuestManager) hear about kills,
+        /// harvests and conversations without a second event system beside
+        /// this one: everything that already calls FireEvent keeps calling
+        /// it, and both Lua and C# listen to the same call.
+        ///
+        /// Fired on whatever thread called FireEvent - today always the tick
+        /// thread - so listeners must be as cheap as a Lua hook.
+        /// </summary>
+        public event Action<PlayerEvent, object[]> EventFired;
+
         public void FireEvent(PlayerEvent evt, params object[] args)
         {
+            // Before the early return below: a C# listener must hear the
+            // event even on a server with no scripts loaded at all.
+            try
+            {
+                EventFired?.Invoke(evt, args);
+            }
+            catch (Exception e)
+            {
+                Logger.Error($"[LuaEngine] C# listener for {evt} threw: {e.Message}");
+            }
+
             if (!hooks.TryGetValue(evt, out List<Closure> list) || list.Count == 0)
                 return;
 

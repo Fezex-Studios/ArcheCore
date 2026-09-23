@@ -230,6 +230,16 @@ namespace ArcheCore.Server.World.Managers
                 session.Health,
                 session.MaxHealth);
 
+            // Quest state arrives in the same load response as the inventory.
+            // The catalogue and log follow EnterWorld, so the client has the
+            // quest texts before it has any state to show with them.
+            var quests = QuestManager.Current;
+            if (quests != null)
+            {
+                quests.LoadInto(session, character.Quests);
+                quests.SendOnEnterWorld(peer, session);
+            }
+
             var (entered, _) = _interest.UpdatePosition(networkId, spawn);
 
             foreach (var otherId in entered)
