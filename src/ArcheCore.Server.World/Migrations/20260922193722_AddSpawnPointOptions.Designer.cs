@@ -10,8 +10,8 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ArcheCore.Server.World.Migrations
 {
     [DbContext(typeof(WorldDataDbContext))]
-    [Migration("20260922185216_AddNpcAggression")]
-    partial class AddNpcAggression
+    [Migration("20260922193722_AddSpawnPointOptions")]
+    partial class AddSpawnPointOptions
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -353,6 +353,21 @@ namespace ArcheCore.Server.World.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<float>("AggroRadius")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("AttackCooldownMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AttackDamageMax")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AttackDamageMin")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<float>("AttackRange")
+                        .HasColumnType("REAL");
+
                     b.Property<string>("Greeting")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -478,9 +493,15 @@ namespace ArcheCore.Server.World.Migrations
                     b.Property<bool>("IsDefault")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("IsRespawnPoint")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("TEXT");
+
+                    b.Property<float>("SafeRadius")
+                        .HasColumnType("REAL");
 
                     b.Property<float>("X")
                         .HasColumnType("REAL");

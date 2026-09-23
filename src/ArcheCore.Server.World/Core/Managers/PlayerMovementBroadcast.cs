@@ -117,11 +117,16 @@ namespace ArcheCore.Server.World.Managers
                 if (!_sessions.TryGetPeer(otherId, out var otherPeer))
                     continue;
 
-                W2CSpawnPlayerPacketSender.Send(_replication, otherPeer, networkId, position, false);
+                // Each side needs the OTHER player's session for the name and
+                // health on their nameplate.
+                _sessions.TryGetSessionByNetworkId(networkId, out var moverSession);
+                _sessions.TryGetSessionByNetworkId(otherId, out var otherSession);
+
+                W2CSpawnPlayerPacketSender.Send(_replication, otherPeer, networkId, position, false, moverSession);
 
                 TryGetPosition(otherId, out Vector3 otherPos);
 
-                W2CSpawnPlayerPacketSender.Send(_replication, sender, otherId, otherPos, false);
+                W2CSpawnPlayerPacketSender.Send(_replication, sender, otherId, otherPos, false, otherSession);
             }
 
             foreach (var otherId in left)

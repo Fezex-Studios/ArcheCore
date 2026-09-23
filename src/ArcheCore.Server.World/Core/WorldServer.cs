@@ -174,8 +174,12 @@ public class WorldServer : IHostedService, INetEventListener
         _lootManager.LoadFromDatabase();
         _combatManager = new CombatManager(
             _dbFactory, _playerManager, _spawnManager, _npcAiManager,
-            _lootManager, _interestManager, _replicationManager);
+            _lootManager, _harvestManager, _spawnPoints, _world, _interestManager, _replicationManager);
         _combatManager.LoadFromDatabase();
+
+        // The AI needs combat to hit players, combat needs the AI to kill
+        // NPCs - one has to be built first, so the link is made here.
+        _npcAiManager.SetCombat(_combatManager);
 
         // 4. Register packets
         _packetDispatcher = new PacketDispatcher();

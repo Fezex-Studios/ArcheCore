@@ -214,7 +214,7 @@ namespace ArcheCore.Server.World.Managers
                 yaw: 0f, pitch: 0f, roll: 0f, state: 0,
                 isNpc: false, _clock.Current);
 
-            W2CSpawnPlayerPacketSender.Send(_replication, peer, networkId, spawn, true);
+            W2CSpawnPlayerPacketSender.Send(_replication, peer, networkId, spawn, true, session);
 
             // Everything the client needs to render itself, in one atomic
             // send: name/level, gold, and full inventory. Pushed blind, no
@@ -247,8 +247,8 @@ namespace ArcheCore.Server.World.Managers
                 _sessions.TryGetSessionByNetworkId(otherId, out var otherSession);
                 var otherPos = otherSession?.Position ?? default;
 
-                W2CSpawnPlayerPacketSender.Send(_replication, peer, otherId, otherPos, false);
-                W2CSpawnPlayerPacketSender.Send(_replication, otherPeer, networkId, spawn, false);
+                W2CSpawnPlayerPacketSender.Send(_replication, peer, otherId, otherPos, false, otherSession);
+                W2CSpawnPlayerPacketSender.Send(_replication, otherPeer, networkId, spawn, false, session);
             }
 
             Logger.Info($"Spawned {character.Name}");

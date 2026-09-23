@@ -185,11 +185,42 @@ namespace ArcheCore.Server.World.Managers
             float pitch = 0f, float roll = 0f, byte state = 0) =>
             _movement.BroadcastPosition(sender, networkId, position, velocity, yaw, pitch, roll, state);
 
+        /// <summary>Dead players don't move. The client locks input too; this is the authority.</summary>
+        public bool TryAcceptMovementChecked(NetPeer peer, PlayerSession session, Vector3 position, Vector3 velocity) =>
+            !session.IsDead && TryAcceptMovement(peer, session, position, velocity);
+
         public bool TryAcceptMovement(NetPeer peer, PlayerSession session, Vector3 position, Vector3 velocity) =>
             _validator.Validate(peer, session, position, velocity) == MovementValidator.Result.Accepted;
 
         public void NotifyAuthoritativeMove(PlayerSession session, Vector3 position) =>
             _validator.NotifyAuthoritativeMove(session, position);
+
+        /// <summary>
+        /// Puts a PLAYER somewhere authoritatively (respawn). The snapshot
+        /// store is what other clients read, so this is what makes everyone
+        /// else see the move.
+        /// </summary>
+        public void SetPlayerTransform(int networkId, Vector3 position) =>
+            _snapshots.SetTransform(
+                networkId, position, velocity: Vector3.Zero, yaw: 0f, pitch: 0f, roll: 0f, state: 0,
+                isNpc: false, _clock.Current);
+
+        /// <summary>Is this player connected, spawned and not dead? Used by NPC aggro.</summary>
+        public bool IsAlive(int networkId) =>
+            TryGetPeer(networkId, out var peer) &&
+            TryGetSession(peer, out var session) &&
+            session.NetworkId == networkId &&
+            !session.IsDead;
+
+        /// <summary>PlayerEvent.OnDeath(player, killerNpcTemplateId).</summary>
+        public void FireDeathEvent(NetPeer peer, int killerTemplateId)
+        {
+            var player = CreateLuaPlayer(peer);
+            if (player == null)
+                return;
+
+            _luaEngine.FireEvent(PlayerEvent.OnDeath, player, killerTemplateId);
+        }
 
         public void SetNpcTransform(
             int networkId, Vector3 position, Vector3 velocity, float yaw, byte state) =>
@@ -504,6 +535,12 @@ namespace ArcheCore.Server.World.Managers
         {
             if (!TryGetSession(peer, out var session) || session.NetworkId == null)
                 return false;
+
+            if (session.IsDead)
+            {
+                W2CInteractDeniedPacketSender.Send(peer, "You can't do that while dead.");
+                return false;
+            }
 
             var inventory = session.Inventory;
 

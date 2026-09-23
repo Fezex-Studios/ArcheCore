@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using LiteNetLib;
 using ArcheCore.Library.Net.Worldserver;
 using ArcheCore.Network.Shared.Packets.W2C;
@@ -15,7 +15,8 @@ namespace ArcheCore.Server.World.Networking.W2C
             NetPeer peer,
             int networkId,
             Vector3 position,
-            bool isLocalPlayer)
+            bool isLocalPlayer,
+            PlayerSession? subject = null)   // nullable: older call sites pass nothing
         {
             replication.Send(
                 Opcodes.SpawnPlayer,
@@ -25,7 +26,15 @@ namespace ArcheCore.Server.World.Networking.W2C
                     x             = position.X,
                     y             = position.Y,
                     z             = position.Z,
-                    IsLocalPlayer = isLocalPlayer
+                    IsLocalPlayer = isLocalPlayer,
+
+                    // The spawned player's own session, when the caller has
+                    // it: their name for the nameplate and their health for
+                    // the target frame. Null (an older call site) just means
+                    // the client shows a nameless plate with no bar.
+                    Name          = subject?.Name ?? string.Empty,
+                    Health        = subject?.Health ?? 0,
+                    MaxHealth     = subject?.MaxHealth ?? 0
                 },
                 peer);
         }

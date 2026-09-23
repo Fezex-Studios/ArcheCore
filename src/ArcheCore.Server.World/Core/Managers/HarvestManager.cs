@@ -227,6 +227,12 @@ namespace ArcheCore.Server.World.Managers
             if (!_players.TryGetSession(peer, out var session) || session.NetworkId == null)
                 return;
 
+            if (session.IsDead)
+            {
+                W2CInteractDeniedPacketSender.Send(peer, "You can't do that while dead.");
+                return;
+            }
+
             if (node.IsDepleted)
             {
                 W2CInteractDeniedPacketSender.Send(peer, $"The {node.Template.Name} has nothing left to gather.");

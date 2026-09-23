@@ -1,4 +1,4 @@
-﻿using ArcheCore.Network.Shared;
+using ArcheCore.Network.Shared;
 using ArcheCore.Library.Net.Worldserver;
 using System.Numerics;
 using ArcheCore.Network.Shared.Packets.C2W;
@@ -65,7 +65,8 @@ namespace ArcheCore.Server.World.Networking.C2W
             // MovementValidator logs the ones that matter. Ordinary
             // rejections happen to honest clients on bad connections and
             // just mean this packet isn't applied; the next one usually is.
-            if (!playerManager.TryAcceptMovement(peer, session, position, velocity))
+            // Checked = the same validation, plus "not while dead" (roadmap J).
+            if (!playerManager.TryAcceptMovementChecked(peer, session, position, velocity))
                 return;
 
             // Jump detection, AFTER the gate. A rejected position must not

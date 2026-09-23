@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using ArcheCore.Network.Shared.Packets.W2C;
+using ArcheCore.Server.World.Core.Services;
+using ArcheCore.Server.World.Utils.Config;
 using ArcheCore.Server.World.GameData.Combat;
 using ArcheCore.Server.World.Networking.W2C;
 using ArcheCore.Server.World.Utils.Database.SQLite;
@@ -36,7 +38,22 @@ namespace ArcheCore.Server.World.Managers
     /// out, so the only way to hit this is a double-press on a laggy
     /// connection - answering each one with "not ready" would just spam.
     ///
-    /// NPCs don't fight back yet; that's roadmap J (player death).
+    /// NPCs FIGHT BACK (roadmap J): NpcAiManager calls NpcAttack when an
+    /// aggressive NPC is in reach and off cooldown. It runs the same
+    /// check-then-apply shape as a player's attack, and the hit goes out as
+    /// the same W2CCombatEvent - so a player being hit and an NPC being hit
+    /// are one code path and one packet, not two.
+    ///
+    /// PLAYER VS PLAYER is off unless AllowPlayerVersusPlayer is set in the
+    /// world server config, and even then not inside a safe zone (any spawn
+    /// point with a SafeRadius) - checked for attacker AND victim, so a town
+    /// can't be shot into from outside it.
+    ///
+    /// At zero health a player DIES: they stay in the world where they fell,
+    /// can't act, and every NPC chasing them goes home. They press Respawn
+    /// (C2WRespawn -> TryRespawn) to come back at the spawn point, at full
+    /// health. Nothing is dropped or lost - what death costs is a decision
+    /// for later, and this is the hook it will hang off.
     /// </summary>
     public class CombatManager
     {
@@ -51,6 +68,9 @@ namespace ArcheCore.Server.World.Managers
         private readonly SpawnManager _spawnManager;
         private readonly NpcAiManager _npcAi;
         private readonly LootManager _loot;
+        private readonly HarvestManager _harvest;
+        private readonly SpawnPointService _spawnPoints;
+        private readonly WorldServerConfig _config;
         private readonly InterestManager _interest;
         private readonly ReplicationManager _replication;
 
@@ -63,9 +83,15 @@ namespace ArcheCore.Server.World.Managers
             SpawnManager spawnManager,
             NpcAiManager npcAi,
             LootManager loot,
+            HarvestManager harvest,
+            SpawnPointService spawnPoints,
+            WorldServerConfig config,
             InterestManager interest,
             ReplicationManager replication)
         {
+            _config = config;
+            _harvest = harvest;
+            _spawnPoints = spawnPoints;
             _dbFactory = dbFactory;
             _players = players;
             _spawnManager = spawnManager;
@@ -125,7 +151,13 @@ namespace ArcheCore.Server.World.Managers
             if (session.SkillCooldowns.TryGetValue(skillId, out long readyAt) && now < readyAt)
                 return;
 
-            // 4
+            // 4 - a player target is PvP, and goes its own way
+            if (!SpawnManager.IsNpcId(targetNetworkId))
+            {
+                AttackPlayer(peer, session, attackerId, targetNetworkId, skill, now);
+                return;
+            }
+
             if (!_spawnManager.TryGetNpc(targetNetworkId, out var npc) || npc.IsDead)
             {
                 W2CInteractDeniedPacketSender.Send(peer, "No valid target.");
@@ -147,6 +179,9 @@ namespace ArcheCore.Server.World.Managers
 
             // 6
             session.SkillCooldowns[skillId] = now + skill.CooldownMs;
+
+            // Hitting something makes it fight back, whatever its aggro radius.
+            _npcAi.OnNpcAttacked(npc.NetworkId, attackerId);
 
             int damage = Rng.Next(skill.MinDamage, skill.MaxDamage + 1);
             npc.Health = Math.Max(0, npc.Health - damage);
@@ -176,9 +211,180 @@ namespace ArcheCore.Server.World.Managers
             }
         }
 
+        // ── Player vs player ─────────────────────────────────────────
+
+        /// <summary>
+        /// One player attacking another. Same shape as attacking an NPC -
+        /// check everything, then apply - with two extra gates: PvP has to be
+        /// switched on for this server, and neither of them may be standing
+        /// in a safe zone.
+        /// </summary>
+        private void AttackPlayer(NetPeer attackerPeer, PlayerSession attacker, int attackerId, int targetId, SkillTemplate skill, long now)
+        {
+            if (targetId == attackerId)
+                return;
+
+            if (!_config.AllowPlayerVersusPlayer)
+            {
+                W2CInteractDeniedPacketSender.Send(attackerPeer, "You can't attack other players here.");
+                return;
+            }
+
+            if (!_players.TryGetPeer(targetId, out var targetPeer) ||
+                !_players.TryGetSession(targetPeer, out var target) ||
+                target.NetworkId != targetId ||
+                target.IsDead)
+            {
+                W2CInteractDeniedPacketSender.Send(attackerPeer, "No valid target.");
+                return;
+            }
+
+            if (_spawnPoints.IsInSafeZone(attacker.Position, out var attackerZone))
+            {
+                W2CInteractDeniedPacketSender.Send(attackerPeer, $"You can't fight in {attackerZone}.");
+                return;
+            }
+
+            if (_spawnPoints.IsInSafeZone(target.Position, out var targetZone))
+            {
+                W2CInteractDeniedPacketSender.Send(attackerPeer, $"They're protected in {targetZone}.");
+                return;
+            }
+
+            if (Vector3.Distance(attacker.Position, target.Position) > skill.Range + RangeTolerance)
+            {
+                W2CInteractDeniedPacketSender.Send(attackerPeer, "Too far away.");
+                return;
+            }
+
+            attacker.SkillCooldowns[skill.Id] = now + skill.CooldownMs;
+
+            int damage = Rng.Next(skill.MinDamage, skill.MaxDamage + 1);
+            target.Health = Math.Max(0, target.Health - damage);
+            bool killed = target.Health == 0;
+
+            Broadcast(attackerPeer, targetId, new W2CCombatEventPacket
+            {
+                AttackerId      = attackerId,
+                TargetId        = targetId,
+                SkillId         = skill.Id,
+                Damage          = damage,
+                TargetHealth    = target.Health,
+                TargetMaxHealth = target.MaxHealth,
+                Killed          = killed,
+                CooldownMs      = skill.CooldownMs
+            });
+
+            // The victim always hears about their own health, even if the
+            // interest grid hasn't paired them with the attacker.
+            W2CHealthUpdatePacketSender.Send(targetPeer, target.Health, target.MaxHealth);
+
+            if (killed)
+            {
+                Logger.Info("[Combat] Account {Account} was killed by account {Killer} (PvP)", target.AccountId, attacker.AccountId);
+                KillPlayer(targetPeer, target, targetId, attacker.Name ?? "another player", killerTemplateId: 0);
+            }
+        }
+
+        // ── NPCs hitting players (roadmap J) ─────────────────────────
+
+        /// <summary>
+        /// An NPC swings at a player. Called from NpcAiManager on the tick
+        /// thread; it re-checks everything itself, because the AI decided to
+        /// attack up to a tick ago and the player may have moved or died.
+        /// </summary>
+        public void NpcAttack(int npcNetworkId, int playerId)
+        {
+            if (!_spawnManager.TryGetNpc(npcNetworkId, out var npc) || npc.IsDead || !npc.IsAggressive)
+                return;
+
+            if (!_players.TryGetPeer(playerId, out var peer) ||
+                !_players.TryGetSession(peer, out var session) ||
+                session.NetworkId != playerId ||
+                session.IsDead)
+                return;
+
+            if (Vector3.Distance(npc.Position, session.Position) > npc.AttackRange + 1f)
+                return;
+
+            int damage = Rng.Next(npc.AttackDamageMin, npc.AttackDamageMax + 1);
+            session.Health = Math.Max(0, session.Health - damage);
+            bool killed = session.Health == 0;
+
+            Broadcast(peer, playerId, new W2CCombatEventPacket
+            {
+                AttackerId      = npc.NetworkId,
+                TargetId        = playerId,
+                SkillId         = 0,
+                Damage          = damage,
+                TargetHealth    = session.Health,
+                TargetMaxHealth = session.MaxHealth,
+                Killed          = killed,
+                CooldownMs      = 0
+            });
+
+            W2CHealthUpdatePacketSender.Send(peer, session.Health, session.MaxHealth);
+
+            if (killed)
+            {
+                Logger.Info("[Combat] Account {Account} was killed by {Npc} ({Id})", session.AccountId, npc.Name, npc.NetworkId);
+                KillPlayer(peer, session, playerId, npc.Name, npc.TemplateId);
+            }
+        }
+
+        /// <summary>
+        /// Shared by both ways to die. killerTemplateId is the NPC template,
+        /// or 0 when another player did it - that's what Lua's OnDeath gets.
+        /// </summary>
+        private void KillPlayer(NetPeer peer, PlayerSession session, int playerId, string killerName, int killerTemplateId)
+        {
+            // Nothing carries on through death.
+            _harvest.CancelFor(playerId, "You black out.");
+            _npcAi.OnPlayerGone(playerId);
+
+            // Remembered so the corpse can send them to the nearest
+            // graveyard rather than wherever they are when they press it.
+            session.DiedAt = session.Position;
+
+            W2CPlayerDeathPacketSender.Send(peer, killerName);
+            _players.FireDeathEvent(peer, killerTemplateId);
+        }
+
+        /// <summary>
+        /// C2WRespawn: back at the spawn point on full health. The snapshot
+        /// store is updated so other clients see the move, and the movement
+        /// validator is told it was authoritative - otherwise the jump across
+        /// the map would look like a speed hack.
+        /// </summary>
+        public void TryRespawn(NetPeer peer)
+        {
+            if (!_players.TryGetSession(peer, out var session) || session.NetworkId is not int playerId)
+                return;
+
+            if (!session.IsDead)
+                return;
+
+            // The nearest respawn point to where they fell, not to where
+            // they are now - a dead player doesn't move, but this keeps the
+            // rule honest if that ever changes.
+            Vector3 spawn = _spawnPoints.GetRespawnNear(session.DiedAt);
+
+            session.Health = session.MaxHealth;
+            session.Position = spawn;
+
+            _players.NotifyAuthoritativeMove(session, spawn);
+            _players.SetPlayerTransform(playerId, spawn);
+
+            W2CRespawnPacketSender.Send(peer, spawn, session.Health, session.MaxHealth);
+
+            Logger.Info("[Combat] Account {Account} respawned at {Spawn}", session.AccountId, spawn);
+        }
+
         /// <summary>Everyone who can see the target, plus the attacker even if the grid hasn't paired them yet.</summary>
         private void Broadcast(NetPeer attacker, int targetId, W2CCombatEventPacket packet)
         {
+            // `attacker` is the peer that must see this hit whatever the grid
+            // says - the attacking player, or the victim when an NPC swings.
             _observerScratch.Clear();
             _observerScratch.Add(attacker);
 

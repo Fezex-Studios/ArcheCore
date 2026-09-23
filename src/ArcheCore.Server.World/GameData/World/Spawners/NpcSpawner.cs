@@ -44,6 +44,11 @@ public class NpcSpawner(InteractionRegistry interactions)
             RespawnSeconds = template.RespawnSeconds,
             Title         = template.Title ?? string.Empty,
             Greeting      = template.Greeting ?? string.Empty,
+            AggroRadius      = template.AggroRadius,
+            AttackRange      = template.AttackRange,
+            AttackCooldownMs = template.AttackCooldownMs,
+            AttackDamageMin  = template.AttackDamageMin,
+            AttackDamageMax  = template.AttackDamageMax,
             Position      = position,
             SpawnOrigin   = position
         };

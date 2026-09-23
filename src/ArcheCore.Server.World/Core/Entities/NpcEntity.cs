@@ -41,5 +41,15 @@ public class NpcEntity : IInteractable
     public string     Title          { get; set; } = string.Empty;
     public string     Greeting       { get; set; } = string.Empty;
 
+    // ── Fighting back (roadmap J) ──
+    public float      AggroRadius      { get; set; }
+    public float      AttackRange      { get; set; } = 2.5f;
+    public int        AttackCooldownMs { get; set; } = 2000;
+    public int        AttackDamageMin  { get; set; }
+    public int        AttackDamageMax  { get; set; }
+
+    /// <summary>Attacks players (and so can be pulled, chased and leashed).</summary>
+    public bool       IsAggressive   => AggroRadius > 0f && AttackDamageMax > 0;
+
     public InteractableKind Kind => InteractableKind.Npc;
 }

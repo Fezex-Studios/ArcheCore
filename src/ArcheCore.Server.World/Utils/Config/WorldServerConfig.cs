@@ -1,4 +1,4 @@
-﻿namespace ArcheCore.Server.World.Utils.Config;
+namespace ArcheCore.Server.World.Utils.Config;
 
 public class WorldServerConfig
 {
@@ -33,6 +33,13 @@ public class WorldServerConfig
     /// true on anything players can reach.
     /// </summary>
     public bool AllowDebugCommands { get; set; } = false;
+
+    /// <summary>
+    /// Can players attack each other? Off by default: turning PvP on is a
+    /// decision about what kind of server this is, not something to inherit
+    /// by accident. Safe zones (SpawnPoints.SafeRadius) still apply when on.
+    /// </summary>
+    public bool AllowPlayerVersusPlayer { get; set; } = false;
 
     /// <summary>
     /// Path to this zone's exported terrain heightmap (see
