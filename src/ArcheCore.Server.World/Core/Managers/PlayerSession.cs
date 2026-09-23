@@ -89,6 +89,18 @@ namespace ArcheCore.Server.World.Managers
         /// <summary>Where this player died - picks the nearest respawn point.</summary>
         public Vector3 DiedAt;
 
+        // ── Quests (roadmap K) ──
+
+        /// <summary>
+        /// Every quest this character has touched, by quest id. Loaded on
+        /// spawn, saved like the inventory: only when QuestsDirty says
+        /// something changed.
+        /// </summary>
+        public readonly Dictionary<int, QuestProgress> Quests = new();
+
+        /// <summary>Set by QuestManager on any change; cleared by the save.</summary>
+        public bool QuestsDirty;
+
         /// <summary>A select/create for this peer is already in flight or done.</summary>
         public bool     SpawnRequested;
 

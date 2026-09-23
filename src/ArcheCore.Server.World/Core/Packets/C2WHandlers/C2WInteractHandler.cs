@@ -47,6 +47,7 @@ namespace ArcheCore.Server.World.Networking.C2W
         private readonly HarvestManager _harvest;
         private readonly ShopManager _shops;
         private readonly LootManager _loot;
+        private readonly QuestManager _quests;
 
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
@@ -56,7 +57,8 @@ namespace ArcheCore.Server.World.Networking.C2W
             InteractionActionCatalog actions,
             HarvestManager harvest,
             ShopManager shops,
-            LootManager loot)
+            LootManager loot,
+            QuestManager quests)
         {
             _playerManager = playerManager;
             _interactions = interactions;
@@ -64,6 +66,7 @@ namespace ArcheCore.Server.World.Networking.C2W
             _harvest = harvest;
             _shops = shops;
             _loot = loot;
+            _quests = quests;
         }
 
         public void Handle(NetPeer peer, NetPacketReader reader)
@@ -154,6 +157,11 @@ namespace ArcheCore.Server.World.Networking.C2W
                 case InteractionActionType.Trade:
                     if (target is NpcEntity trader && !_shops.TryOpen(peer, trader))
                         W2CInteractDeniedPacketSender.Send(peer, $"{trader.Name} has nothing to trade.");
+                    break;
+
+                case InteractionActionType.Quests:
+                    if (target is NpcEntity questGiver && session != null)
+                        _quests.SendOffers(peer, session, questGiver);
                     break;
 
                 case InteractionActionType.Climb:

@@ -151,8 +151,16 @@ public class WorldServer : IHostedService, INetEventListener
         _npcAiManager = new NpcAiManager(_spawnManager, _interestManager, _replicationManager, _playerManager);
 
         // 3. Load game data
-        _questManager.LoadFromDatabase();
+        // Quests: definitions first, then the runtime links. Initialize is
+        // what subscribes QuestManager to LuaEngine.EventFired - the hook
+        // that turns kills, harvests and conversations into progress.
         _itemManager.LoadFromDatabase();
+
+        // After items: quest definitions check their Collect and reward item
+        // ids against ItemManager, and Initialize is what hands it over (as
+        // well as subscribing quests to LuaEngine.EventFired).
+        _questManager.Initialize(_playerManager, _itemManager, _spawnManager, _playerManager.LuaEngine);
+        _questManager.LoadFromDatabase();
         await _spawnPoints.LoadAsync();
 
         // F/G actions for every interactable. Loaded before anything can
@@ -322,6 +330,7 @@ public class WorldServer : IHostedService, INetEventListener
         services.Register(_shopManager);
         services.Register(_lootManager);
         services.Register(_interactionActions);
+        services.Register(_questManager);
         services.Register(_combatManager);
 
         _packetDispatcher.AutoRegister(services.Resolve, typeof(WorldServer).Assembly);

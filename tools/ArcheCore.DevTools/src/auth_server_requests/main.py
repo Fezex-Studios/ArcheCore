@@ -12,7 +12,7 @@ data = {
 body1 = json.dumps(data).encode("utf-8")
 body2 = json.dumps(data2).encode("utf-8")
 
-req = Request("http://127.0.0.1:3000/login",data=body1,method="POST",headers={"Content-Type":"application/json"})
+req = Request("http://127.0.0.1:3000/login",data=body2,method="POST",headers={"Content-Type":"application/json"})
 
 
 

@@ -17,7 +17,8 @@ public class WorldDataDbContext : DbContext
     public WorldDataDbContext(DbContextOptions<WorldDataDbContext> options)
         : base(options) { }
 
-    public DbSet<QuestTable>      Quests       => Set<QuestTable>();
+    public DbSet<QuestTable>          Quests          => Set<QuestTable>();
+    public DbSet<QuestObjectiveTable> QuestObjectives => Set<QuestObjectiveTable>();
     public DbSet<NpcTemplate>     NpcTemplates => Set<NpcTemplate>();
     public DbSet<NpcSpawnerTable> NpcSpawners  => Set<NpcSpawnerTable>();
     public DbSet<TestTableOne>  TestTableOnes => Set<TestTableOne>();

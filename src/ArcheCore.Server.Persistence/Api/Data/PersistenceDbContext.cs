@@ -10,6 +10,7 @@ namespace ArcheCore.PersistenceServer.Api.Data
 
         public DbSet<Character> Characters => Set<Character>();
         public DbSet<CharacterInventoryItem> InventoryItems => Set<CharacterInventoryItem>();
+        public DbSet<CharacterQuest> CharacterQuests => Set<CharacterQuest>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -38,6 +39,22 @@ namespace ArcheCore.PersistenceServer.Api.Data
             // the Character row; every inventory read here is an explicit,
             // separate query (see /characters/load and
             // /characters/inventory/save in Program.cs).
+            // Quest state, same shape and same reasoning as inventory rows:
+            // no navigation property, explicit queries only, composite key so
+            // saving is an upsert.
+            modelBuilder.Entity<CharacterQuest>(entity =>
+            {
+                entity.ToTable("character_quests");
+                entity.HasKey(q => new { q.CharacterId, q.QuestId });
+
+                entity.Property(q => q.CharacterId).HasColumnName("character_id");
+                entity.Property(q => q.QuestId).HasColumnName("quest_id");
+                entity.Property(q => q.Status).HasColumnName("status");
+                entity.Property(q => q.Progress).HasColumnName("progress").HasMaxLength(128).IsRequired();
+
+                entity.HasIndex(q => q.CharacterId);
+            });
+
             modelBuilder.Entity<CharacterInventoryItem>(entity =>
             {
                 entity.ToTable("character_inventory");

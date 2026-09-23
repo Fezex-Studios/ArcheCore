@@ -77,6 +77,15 @@
         C2WRespawn              = 59, // C2W: the Respawn button
         W2CRespawn              = 60, // W2C: where you came back, and your health
         W2CNpcHealth            = 61, // W2C: an NPC's health changed outside combat (healed after leashing home)
+
+        // --- Quests (roadmap K/L/M) ---
+        W2CQuestCatalog         = 62, // W2C: every quest definition, once on entering the world
+        W2CQuestLog             = 63, // W2C: this character's full quest state (accepted, progress, done)
+        W2CQuestUpdate          = 64, // W2C: one quest changed - accepted, progressed, completed, abandoned
+        W2CQuestOffers          = 65, // W2C: what this quest giver can offer or take back
+        C2WQuestAccept          = 66, // C2W: accept a quest from a giver
+        C2WQuestComplete        = 67, // C2W: hand a finished quest in
+        C2WQuestAbandon         = 68, // C2W: drop a quest from the log
         
         
         

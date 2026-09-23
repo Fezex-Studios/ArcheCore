@@ -109,9 +109,25 @@ namespace ArcheCore.Server.World.Managers
                 targetInventory = (InventorySlot[])session.Inventory.Clone();
             }
 
+            // Quests ride the same pass. They're sent whole rather than as a
+            // diff: a character has a handful of quest rows, so working out
+            // which changed would cost more than sending them.
+            QuestStateDto[] quests = null;
+
+            var questManager = QuestManager.Current;
+
+            if (session.QuestsDirty && questManager != null)
+            {
+                quests = questManager.BuildSaveSet(session);
+                session.QuestsDirty = false;   // set again below if the save fails
+            }
+
             _ = SaveAndReportAsync(
                 session, characterId, accountId, name, level, pos, gold,
                 inventoryDiff, targetInventory);
+
+            if (quests is { Length: > 0 })
+                _ = SaveQuestsAndReportAsync(session, characterId, accountId, quests);
         }
 
         private async Task SaveAndReportAsync(
@@ -156,6 +172,28 @@ namespace ArcheCore.Server.World.Managers
                     }
                 }
             });
+        }
+
+        private async Task SaveQuestsAndReportAsync(
+            PlayerSession session, long characterId, int accountId, QuestStateDto[] quests)
+        {
+            bool ok = false;
+
+            try
+            {
+                ok = await _persistence.W2PQuestSave.Send(characterId, accountId, quests);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[CharacterPersistence] Quest save threw for character {characterId}: {ex.Message}");
+            }
+
+            if (ok)
+                return;
+
+            // Not confirmed: mark it dirty again so the next autosave retries
+            // with whatever the state is by then.
+            _enqueueOnTickThread(() => session.QuestsDirty = true);
         }
 
         private static bool InventoryEquals(InventorySlot[] a, InventorySlot[] b)

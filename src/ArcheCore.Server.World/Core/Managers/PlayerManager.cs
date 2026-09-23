@@ -234,6 +234,13 @@ namespace ArcheCore.Server.World.Managers
             _jumps.Remove(networkId);
         }
 
+        /// <summary>
+        /// The one script engine. Exposed so server systems can subscribe to
+        /// LuaEngine.EventFired (QuestManager does) instead of a second event
+        /// system being invented beside it.
+        /// </summary>
+        public LuaEngine LuaEngine => _luaEngine;
+
         public LuaPlayer CreateLuaPlayer(NetPeer peer)
         {
             if (!_sessions.TryGetSession(peer, out var session) || session.NetworkId is not int networkId)
