@@ -36,4 +36,16 @@ public class NpcTemplate
 
     /// <summary>What the NPC says when you use its Talk action. Empty = nothing (Lua can still react).</summary>
     public string Greeting { get; set; } = string.Empty;
+
+    // ── Fighting back (roadmap J) ──
+    // All default to 0, so an NPC only becomes dangerous when its row says so.
+
+    /// <summary>How close a player must come before it attacks. 0 = never aggressive.</summary>
+    public float  AggroRadius      { get; set; }
+
+    /// <summary>How close it must be to hit. Also how close it walks before stopping.</summary>
+    public float  AttackRange      { get; set; } = 2.5f;
+    public int    AttackCooldownMs { get; set; } = 2000;
+    public int    AttackDamageMin  { get; set; }
+    public int    AttackDamageMax  { get; set; }
 }

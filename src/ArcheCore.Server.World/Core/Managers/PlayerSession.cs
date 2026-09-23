@@ -86,6 +86,9 @@ namespace ArcheCore.Server.World.Managers
         /// <summary>Skill id -> Environment.TickCount64 when it's ready again.</summary>
         public readonly Dictionary<int, long> SkillCooldowns = new();
 
+        /// <summary>Where this player died - picks the nearest respawn point.</summary>
+        public Vector3 DiedAt;
+
         /// <summary>A select/create for this peer is already in flight or done.</summary>
         public bool     SpawnRequested;
 

@@ -19,6 +19,18 @@ namespace ArcheCore.Server.World.Networking.W2C
         }
     }
 
+    /// <summary>NPC health outside of combat - see W2CNpcHealthPacket (leash heal).</summary>
+    public static class W2CNpcHealthPacketSender
+    {
+        public static void Send(ReplicationManager replication, IEnumerable<NetPeer> peers, int networkId, int health, int maxHealth)
+        {
+            replication.Broadcast(
+                Opcodes.W2CNpcHealth,
+                new W2CNpcHealthPacket { NetworkId = networkId, Health = health, MaxHealth = maxHealth },
+                peers);
+        }
+    }
+
     public static class W2CHealthUpdatePacketSender
     {
         public static void Send(NetPeer peer, int health, int maxHealth)

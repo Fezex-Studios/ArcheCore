@@ -2,6 +2,7 @@
 using ArcheCore.Server.World.Utils.Database.SQLite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -9,9 +10,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ArcheCore.Server.World.Migrations
 {
     [DbContext(typeof(WorldDataDbContext))]
-    partial class WorldDataDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260922192117_AddNpcAggression")]
+    partial class AddNpcAggression
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.0");
@@ -490,15 +493,9 @@ namespace ArcheCore.Server.World.Migrations
                     b.Property<bool>("IsDefault")
                         .HasColumnType("INTEGER");
 
-                    b.Property<bool>("IsRespawnPoint")
-                        .HasColumnType("INTEGER");
-
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("TEXT");
-
-                    b.Property<float>("SafeRadius")
-                        .HasColumnType("REAL");
 
                     b.Property<float>("X")
                         .HasColumnType("REAL");

@@ -76,6 +76,7 @@
         W2CPlayerDeath          = 58, // W2C: you died - who killed you
         C2WRespawn              = 59, // C2W: the Respawn button
         W2CRespawn              = 60, // W2C: where you came back, and your health
+        W2CNpcHealth            = 61, // W2C: an NPC's health changed outside combat (healed after leashing home)
         
         
         

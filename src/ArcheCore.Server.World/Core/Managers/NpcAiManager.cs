@@ -76,10 +76,20 @@ namespace ArcheCore.Server.World.Managers
         private readonly ReplicationManager _replication;
         private readonly PlayerManager _playerManager;
 
+        /// <summary>
+        /// Set after construction (SetCombat) rather than injected: combat
+        /// needs the AI to kill NPCs and the AI needs combat to hit players,
+        /// and one of the two has to be built first.
+        /// </summary>
+        private CombatManager _combat;
+
         private readonly ConcurrentDictionary<int, NpcAiState> _active = new();
 
         // Dead NPCs waiting to be replaced: (spawner id, when). Tick thread only.
         private readonly List<(int SpawnerId, DateTime DueAt)> _respawns = new();
+
+        // Reused every leash-heal, tick thread only.
+        private readonly List<NetPeer> _healScratch = new();
         private static readonly TimeSpan DefaultRespawn = TimeSpan.FromSeconds(30);
 
         private DateTime _lastSpawnerScan = DateTime.MinValue;
@@ -108,12 +118,29 @@ namespace ArcheCore.Server.World.Managers
         private const float LeashRadius = 15f;    // max wander distance from spawn origin
         private const float ArriveDistance = 0.5f;
 
+        /// <summary>Chasing is faster than wandering, but slower than a player - you can escape.</summary>
+        private const float ChaseSpeed = 3.2f;
+
+        /// <summary>Give up and walk home once this far from where it spawned.</summary>
+        private const float MaxChaseDistance = 25f;
+
         private class NpcAiState
         {
             public int NetworkId;
             public Vector3 SpawnOrigin;
             public Vector3 CurrentPosition;
             public Vector3? WanderTarget;
+
+            // ── Combat (roadmap J) ──
+
+            /// <summary>Player being chased, or 0. Set by aggro or by being hit.</summary>
+            public int TargetPlayerId;
+
+            /// <summary>Environment.TickCount64 when this NPC may swing again.</summary>
+            public long NextAttackAtMs;
+
+            /// <summary>Walking home after losing a target - won't re-aggro until it arrives.</summary>
+            public bool Returning;
         }
 
         public NpcAiManager(
@@ -151,6 +178,33 @@ namespace ArcheCore.Server.World.Managers
         /// SpawnerScanInterval so this stays cheap on ticks where neither
         /// is due yet.
         /// </summary>
+        /// <summary>Called once at boot by WorldServer, after CombatManager exists.</summary>
+        public void SetCombat(CombatManager combat) => _combat = combat;
+
+        /// <summary>
+        /// Someone hit this NPC: it fights back, whatever its aggro radius.
+        /// Main thread only (CombatManager calls it from a packet handler).
+        /// </summary>
+        public void OnNpcAttacked(int npcNetworkId, int attackerPlayerId)
+        {
+            if (_active.TryGetValue(npcNetworkId, out var state))
+            {
+                state.TargetPlayerId = attackerPlayerId;
+                state.Returning = false;
+            }
+        }
+
+        /// <summary>A player died or left - every NPC chasing them goes home.</summary>
+        public void OnPlayerGone(int playerId)
+        {
+            foreach (var state in _active.Values)
+            {
+                if (state.TargetPlayerId != playerId) continue;
+                state.TargetPlayerId = 0;
+                state.Returning = true;
+            }
+        }
+
         public void Tick()
         {
             try
@@ -207,6 +261,10 @@ namespace ArcheCore.Server.World.Managers
 
                 if (moveDelta > TimeSpan.Zero)
                     RunMoveStep(moveDelta);
+
+                // ATTACKS: every tick, so a cooldown lands when it's ready
+                // rather than on the next 300ms decision boundary.
+                RunAttackStep();
             }
             catch (Exception ex)
             {
@@ -334,6 +392,30 @@ namespace ArcheCore.Server.World.Managers
         {
             foreach (var state in _active.Values)
             {
+                // Aggro first: who (if anyone) is this NPC chasing now?
+                UpdateTarget(state);
+
+                if (state.TargetPlayerId != 0)
+                {
+                    // Chase: the waypoint IS the player, refreshed every pass.
+                    if (_playerManager.TryGetPosition(state.TargetPlayerId, out var chased))
+                        state.WanderTarget = chased;
+                    continue;
+                }
+
+                if (state.Returning)
+                {
+                    state.WanderTarget = state.SpawnOrigin;
+
+                    if (Vector3.Distance(state.CurrentPosition, state.SpawnOrigin) <= ArriveDistance)
+                    {
+                        state.Returning = false;
+                        HealOnArrival(state.NetworkId);
+                    }
+
+                    continue;
+                }
+
                 if (state.WanderTarget is { } existing &&
                     Vector3.Distance(state.CurrentPosition, existing) >= ArriveDistance)
                 {
@@ -346,6 +428,121 @@ namespace ArcheCore.Server.World.Managers
                 state.WanderTarget = state.SpawnOrigin + new Vector3(
                     (float)(Math.Cos(angle) * dist), 0,
                     (float)(Math.Sin(angle) * dist));
+            }
+        }
+
+        /// <summary>
+        /// An NPC that made it home is whole again - otherwise a player could
+        /// wear one down over several pulls, and the next player to find it
+        /// would get a half-dead orc for free.
+        ///
+        /// Healing is silent for anyone not watching, so it has to be told to
+        /// the people who ARE: without the packet their health bars would
+        /// still show it hurt until the next time someone hit it.
+        /// </summary>
+        private void HealOnArrival(int networkId)
+        {
+            if (!_spawnManager.TryGetNpc(networkId, out var npc) || !npc.IsAttackable)
+                return;
+
+            if (npc.Health >= npc.MaxHealth)
+                return;
+
+            npc.Health = npc.MaxHealth;
+
+            _healScratch.Clear();
+            foreach (int observerId in _interest.GetKnownBy(networkId))
+            {
+                if (SpawnManager.IsNpcId(observerId)) continue;
+                if (_playerManager.TryGetPeer(observerId, out var peer)) _healScratch.Add(peer);
+            }
+
+            if (_healScratch.Count > 0)
+                W2CNpcHealthPacketSender.Send(_replication, _healScratch, networkId, npc.Health, npc.MaxHealth);
+        }
+
+        /// <summary>
+        /// Picks or drops this NPC's target. An NPC gives up when the player
+        /// dies, disconnects, outruns its aggro radius, or when the chase has
+        /// pulled it MaxChaseDistance from home - the classic leash, so a
+        /// player can't drag a mob across the world.
+        /// </summary>
+        private void UpdateTarget(NpcAiState state)
+        {
+            if (!_spawnManager.TryGetNpc(state.NetworkId, out var npc) || !npc.IsAggressive)
+            {
+                state.TargetPlayerId = 0;
+                return;
+            }
+
+            if (state.TargetPlayerId != 0)
+            {
+                bool lost =
+                    !_playerManager.IsAlive(state.TargetPlayerId) ||
+                    !_playerManager.TryGetPosition(state.TargetPlayerId, out var pos) ||
+                    Vector3.Distance(state.CurrentPosition, pos) > npc.AggroRadius * 2f ||
+                    Vector3.Distance(state.SpawnOrigin, state.CurrentPosition) > MaxChaseDistance;
+
+                if (lost)
+                {
+                    state.TargetPlayerId = 0;
+                    state.Returning = true;
+                }
+
+                return;
+            }
+
+            if (state.Returning)
+                return; // walk home first
+
+            // Candidates are the players who can already see this NPC - the
+            // interest grid has done the "who is nearby" work.
+            int best = 0;
+            float bestDistance = npc.AggroRadius;
+
+            foreach (int observerId in _interest.GetKnownBy(state.NetworkId))
+            {
+                if (SpawnManager.IsNpcId(observerId)) continue;
+                if (!_playerManager.IsAlive(observerId)) continue;
+                if (!_playerManager.TryGetPosition(observerId, out var candidate)) continue;
+
+                float distance = Vector3.Distance(state.CurrentPosition, candidate);
+                if (distance <= bestDistance)
+                {
+                    bestDistance = distance;
+                    best = observerId;
+                }
+            }
+
+            state.TargetPlayerId = best;
+        }
+
+        /// <summary>
+        /// Swing at anything in reach whose cooldown is up. The damage, range
+        /// and cooldown are the NPC's own data; CombatManager applies it, so
+        /// players and NPCs hit each other through the same code path.
+        /// </summary>
+        private void RunAttackStep()
+        {
+            if (_combat == null)
+                return;
+
+            long now = Environment.TickCount64;
+
+            foreach (var state in _active.Values)
+            {
+                if (state.TargetPlayerId == 0) continue;
+                if (now < state.NextAttackAtMs) continue;
+
+                if (!_spawnManager.TryGetNpc(state.NetworkId, out var npc) || !npc.IsAggressive) continue;
+                if (!_playerManager.TryGetPosition(state.TargetPlayerId, out var targetPos)) continue;
+                if (Vector3.Distance(state.CurrentPosition, targetPos) > npc.AttackRange + 0.5f) continue;
+
+                state.NextAttackAtMs = now + Math.Max(500, npc.AttackCooldownMs);
+
+                int npcId = state.NetworkId;
+                int playerId = state.TargetPlayerId;
+                _playerManager.EnqueueAction(() => _combat.NpcAttack(npcId, playerId));
             }
         }
 
@@ -374,8 +571,24 @@ namespace ArcheCore.Server.World.Managers
             if (distance <= 0.01f)
                 return;
 
+            // Chasing: move faster, and stop at arm's length instead of
+            // walking into the player - otherwise it shoves them around and
+            // keeps overshooting as they move.
+            bool chasing = state.TargetPlayerId != 0;
+            float speed = WanderSpeed;
+            float stopDistance = ArriveDistance;
+
+            if (chasing && _spawnManager.TryGetNpc(state.NetworkId, out var chaser))
+            {
+                speed = ChaseSpeed;
+                stopDistance = Math.Max(1f, chaser.AttackRange * 0.8f);
+            }
+
+            if (distance <= stopDistance)
+                return; // close enough to swing - stand and fight
+
             var direction = Vector3.Normalize(toTarget);
-            var step = Math.Min(distance, WanderSpeed * (float)delta.TotalSeconds);
+            var step = Math.Min(distance, speed * (float)delta.TotalSeconds);
             var newPos = state.CurrentPosition + direction * step;
             state.CurrentPosition = newPos;
 
@@ -392,8 +605,8 @@ namespace ArcheCore.Server.World.Managers
             // alternative - reporting WanderSpeed right up to the waypoint -
             // walks every observer's copy up to half a unit past the turn
             // and then snaps it back.
-            var arriving = distance - step <= ArriveDistance;
-            var velocity = arriving ? Vector3.Zero : direction * WanderSpeed;
+            var arriving = distance - step <= stopDistance;
+            var velocity = arriving ? Vector3.Zero : direction * speed;
 
             // Facing, in radians, matching EntityStateCodec.QuantizeYaw.
             // NPCs previously reported nothing here and the client derived

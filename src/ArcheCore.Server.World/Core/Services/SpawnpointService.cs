@@ -2,6 +2,7 @@ using System.Numerics;
 using Microsoft.EntityFrameworkCore;
 using NLog;
 using ArcheCore.Server.World.Utils.Database.SQLite;
+using ArcheCore.Server.World.GameData.World.PlayerSpawn;   // SpawnPointTable, now named directly
 
 namespace ArcheCore.Server.World.Core.Services;
 
@@ -32,6 +33,10 @@ public class SpawnPointService
 
     private Vector3 _defaultSpawn = HardcodedFallback;
 
+    // Every row, kept for respawn choice and safe zones. Read-only after
+    // LoadAsync, so any thread can use it.
+    private SpawnPointTable[] _all = System.Array.Empty<SpawnPointTable>();
+
     public SpawnPointService(IDbContextFactory<WorldDataDbContext> dbFactory)
     {
         _dbFactory = dbFactory;
@@ -41,7 +46,14 @@ public class SpawnPointService
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
-        var defaults = await db.SpawnPointTables.Where(s => s.IsDefault).ToListAsync();
+        _all = await db.SpawnPointTables.ToArrayAsync();
+
+        int respawnPoints = _all.Count(s => s.IsRespawnPoint);
+        int safeZones = _all.Count(s => s.SafeRadius > 0f);
+        Logger.Info($"[SpawnPointService] {_all.Length} spawn point(s): " +
+                    $"{respawnPoints} respawn point(s), {safeZones} safe zone(s).");
+
+        var defaults = _all.Where(s => s.IsDefault).ToList();
 
         if (defaults.Count == 1)
         {
@@ -55,7 +67,7 @@ public class SpawnPointService
             Logger.Warn($"[SpawnPointService] {defaults.Count} SpawnPoints have IsDefault=true - " +
                         "should be exactly one. Using the first.");
 
-        var fallback = defaults.FirstOrDefault() ?? await db.SpawnPointTables.FirstOrDefaultAsync();
+        var fallback = defaults.FirstOrDefault() ?? _all.FirstOrDefault();
 
         if (fallback != null)
         {
@@ -72,4 +84,50 @@ public class SpawnPointService
     }
 
     public Vector3 GetDefaultSpawn() => _defaultSpawn;
+
+    /// <summary>
+    /// Where a player who died HERE comes back: the nearest row marked
+    /// IsRespawnPoint. With none marked, everyone returns to the default
+    /// spawn - the behaviour before respawn points existed.
+    /// </summary>
+    public Vector3 GetRespawnNear(Vector3 diedAt)
+    {
+        SpawnPointTable best = null;
+        float bestDistance = float.MaxValue;
+
+        foreach (var point in _all)
+        {
+            if (!point.IsRespawnPoint) continue;
+
+            float distance = Vector3.Distance(diedAt, new Vector3(point.X, point.Y, point.Z));
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                best = point;
+            }
+        }
+
+        return best != null ? new Vector3(best.X, best.Y, best.Z) : _defaultSpawn;
+    }
+
+    /// <summary>
+    /// Is this position inside a no-PvP zone? Checked for BOTH players in a
+    /// fight, so standing outside a town and shooting in doesn't work.
+    /// </summary>
+    public bool IsInSafeZone(Vector3 position, out string zoneName)
+    {
+        foreach (var point in _all)
+        {
+            if (point.SafeRadius <= 0f) continue;
+
+            if (Vector3.Distance(position, new Vector3(point.X, point.Y, point.Z)) <= point.SafeRadius)
+            {
+                zoneName = point.Name;
+                return true;
+            }
+        }
+
+        zoneName = null;
+        return false;
+    }
 }

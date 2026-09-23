@@ -1,4 +1,4 @@
-﻿using MessagePack;
+using MessagePack;
 
 namespace ArcheCore.Network.Shared.Packets.W2C
 {
@@ -12,5 +12,12 @@ namespace ArcheCore.Network.Shared.Packets.W2C
         public float z;
 
         public bool IsLocalPlayer;
+
+        /// <summary>Character name, for nameplates.</summary>
+        public string Name;
+
+        /// <summary>For other players' nameplates and the target frame (PvP). 0/0 = unknown.</summary>
+        public int Health;
+        public int MaxHealth;
     }
 }
