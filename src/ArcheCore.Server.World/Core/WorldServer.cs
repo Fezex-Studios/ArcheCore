@@ -46,6 +46,8 @@ public class WorldServer : IHostedService, INetEventListener
     private ShopManager _shopManager;
     private LootManager _lootManager;
     private InteractionActionCatalog _interactionActions;
+    private MountManager _mountManager;
+    private PetManager _petManager;
     private CombatManager _combatManager;
     private CancellationTokenSource _tickCts;
     private Task _tickLoop;
@@ -184,6 +186,15 @@ public class WorldServer : IHostedService, INetEventListener
             _dbFactory, _playerManager, _spawnManager, _npcAiManager,
             _lootManager, _harvestManager, _spawnPoints, _world, _interestManager, _replicationManager);
         _combatManager.LoadFromDatabase();
+
+        // Mounts and pets. PlayerManager reaches them through properties
+        // because using an ITEM is what triggers both, and PlayerManager was
+        // built long before either existed.
+        _mountManager = new MountManager(_dbFactory, _playerManager, _interestManager, _replicationManager);
+        _mountManager.LoadFromDatabase();
+        _petManager = new PetManager(_playerManager, _spawnManager, _npcAiManager, _interestManager);
+        _playerManager.Mounts = _mountManager;
+        _playerManager.Pets = _petManager;
 
         // The AI needs combat to hit players, combat needs the AI to kill
         // NPCs - one has to be built first, so the link is made here.
@@ -331,6 +342,8 @@ public class WorldServer : IHostedService, INetEventListener
         services.Register(_lootManager);
         services.Register(_interactionActions);
         services.Register(_questManager);
+        services.Register(_mountManager);
+        services.Register(_petManager);
         services.Register(_combatManager);
 
         _packetDispatcher.AutoRegister(services.Resolve, typeof(WorldServer).Assembly);

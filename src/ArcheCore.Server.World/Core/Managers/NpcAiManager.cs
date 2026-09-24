@@ -124,6 +124,9 @@ namespace ArcheCore.Server.World.Managers
         /// <summary>Give up and walk home once this far from where it spawned.</summary>
         private const float MaxChaseDistance = 25f;
 
+        /// <summary>How close a pet gets before it stops walking.</summary>
+        private const float PetFollowDistance = 3f;
+
         private class NpcAiState
         {
             public int NetworkId;
@@ -141,6 +144,12 @@ namespace ArcheCore.Server.World.Managers
 
             /// <summary>Walking home after losing a target - won't re-aggro until it arrives.</summary>
             public bool Returning;
+
+            /// <summary>
+            /// Player this NPC belongs to, or 0. A pet (roadmap O) follows its
+            /// owner instead of wandering, and never picks its own fights.
+            /// </summary>
+            public int OwnerPlayerId;
         }
 
         public NpcAiManager(
@@ -192,6 +201,34 @@ namespace ArcheCore.Server.World.Managers
                 state.TargetPlayerId = attackerPlayerId;
                 state.Returning = false;
             }
+        }
+
+        /// <summary>
+        /// Put a spawned NPC under a player's command (roadmap O). It leaves
+        /// the wander/aggro behaviour entirely and just follows.
+        /// </summary>
+        public void RegisterPet(NpcEntity pet, int ownerPlayerId)
+        {
+            _active[pet.NetworkId] = new NpcAiState
+            {
+                NetworkId       = pet.NetworkId,
+                SpawnOrigin     = pet.SpawnOrigin,
+                CurrentPosition = pet.Position,
+                OwnerPlayerId   = ownerPlayerId
+            };
+
+            BroadcastSpawnToNearbyPlayers(pet);
+        }
+
+        /// <summary>
+        /// Take a pet out of the world: out of the AI, out of everyone's view
+        /// and out of the snapshot store. The same teardown a killed NPC gets
+        /// (RemoveNpcInterest), so a dismissed pet can't linger on a client.
+        /// </summary>
+        public void UnregisterPet(int networkId)
+        {
+            _active.TryRemove(networkId, out _);
+            RemoveNpcInterest(networkId);
         }
 
         /// <summary>A player died or left - every NPC chasing them goes home.</summary>
@@ -392,6 +429,14 @@ namespace ArcheCore.Server.World.Managers
         {
             foreach (var state in _active.Values)
             {
+                // A pet follows its owner and does nothing else: no wandering,
+                // no aggro, no leash. Everything below is for wild NPCs.
+                if (state.OwnerPlayerId != 0)
+                {
+                    FollowOwner(state);
+                    continue;
+                }
+
                 // Aggro first: who (if anyone) is this NPC chasing now?
                 UpdateTarget(state);
 
@@ -429,6 +474,24 @@ namespace ArcheCore.Server.World.Managers
                     (float)(Math.Cos(angle) * dist), 0,
                     (float)(Math.Sin(angle) * dist));
             }
+        }
+
+        /// <summary>Pets walk to their owner and stop at a polite distance.</summary>
+        private void FollowOwner(NpcAiState state)
+        {
+            if (!_playerManager.TryGetPosition(state.OwnerPlayerId, out var owner))
+            {
+                state.WanderTarget = null;
+                return;
+            }
+
+            float distance = Vector3.Distance(state.CurrentPosition, owner);
+
+            // Walk to them and stop at a polite distance. Pets move at the
+            // chase speed, which is faster than a player walks but slower
+            // than a mount - so riding off does leave your pet behind, which
+            // is honest rather than magic.
+            state.WanderTarget = distance > PetFollowDistance ? owner : (Vector3?)null;
         }
 
         /// <summary>
@@ -574,14 +637,19 @@ namespace ArcheCore.Server.World.Managers
             // Chasing: move faster, and stop at arm's length instead of
             // walking into the player - otherwise it shoves them around and
             // keeps overshooting as they move.
-            bool chasing = state.TargetPlayerId != 0;
+            bool chasing = state.TargetPlayerId != 0 || state.OwnerPlayerId != 0;
             float speed = WanderSpeed;
             float stopDistance = ArriveDistance;
 
-            if (chasing && _spawnManager.TryGetNpc(state.NetworkId, out var chaser))
+            if (chasing)
             {
                 speed = ChaseSpeed;
-                stopDistance = Math.Max(1f, chaser.AttackRange * 0.8f);
+
+                stopDistance = state.OwnerPlayerId != 0
+                    ? PetFollowDistance * 0.8f
+                    : _spawnManager.TryGetNpc(state.NetworkId, out var chaser)
+                        ? Math.Max(1f, chaser.AttackRange * 0.8f)
+                        : stopDistance;
             }
 
             if (distance <= stopDistance)

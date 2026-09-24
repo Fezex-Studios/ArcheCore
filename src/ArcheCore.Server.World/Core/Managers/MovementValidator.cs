@@ -292,7 +292,12 @@ namespace ArcheCore.Server.World.Managers
             // re-enables the CharacterController there. The character then
             // falls through the world. A validator that manufactures the
             // exact failure it exists to prevent is worse than no validator.
-            Refill(ref session.HorizontalBudget, dt, MaxHorizontalSpeed);
+            // A mounted player is allowed to be faster - by exactly the
+            // mount's multiplier and no more, so the mount widens the
+            // allowance rather than switching the check off.
+            float horizontalCap = MaxHorizontalSpeed * (session.SpeedMultiplier > 0f ? session.SpeedMultiplier : 1f);
+
+            Refill(ref session.HorizontalBudget, dt, horizontalCap);
             Refill(ref session.UpBudget,         dt, MaxUpwardSpeed);
             Refill(ref session.DownBudget,       dt, MaxDownwardSpeed);
 

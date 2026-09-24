@@ -183,6 +183,9 @@ namespace ArcheCore.Server.World.Managers
             // Hitting something makes it fight back, whatever its aggro radius.
             _npcAi.OnNpcAttacked(npc.NetworkId, attackerId);
 
+            // You can't swing from the saddle.
+            _players.Mounts?.Dismount(peer, session, "You dismount to fight.");
+
             int damage = Rng.Next(skill.MinDamage, skill.MaxDamage + 1);
             npc.Health = Math.Max(0, npc.Health - damage);
             bool killed = npc.Health == 0;
@@ -325,6 +328,10 @@ namespace ArcheCore.Server.World.Managers
 
             W2CHealthUpdatePacketSender.Send(peer, session.Health, session.MaxHealth);
 
+            // Being hit throws you off - otherwise riding would be a way to
+            // shrug off everything that hits you.
+            _players.Mounts?.Dismount(peer, session, "You are thrown from your mount!");
+
             if (killed)
             {
                 Logger.Info("[Combat] Account {Account} was killed by {Npc} ({Id})", session.AccountId, npc.Name, npc.NetworkId);
@@ -340,6 +347,8 @@ namespace ArcheCore.Server.World.Managers
         {
             // Nothing carries on through death.
             _harvest.CancelFor(playerId, "You black out.");
+            _players.Mounts?.Dismount(peer, session);
+            _players.Pets?.Dismiss(session);
             _npcAi.OnPlayerGone(playerId);
 
             // Remembered so the corpse can send them to the nearest

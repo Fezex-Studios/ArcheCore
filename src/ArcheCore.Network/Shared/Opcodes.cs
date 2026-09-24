@@ -86,6 +86,9 @@
         C2WQuestAccept          = 66, // C2W: accept a quest from a giver
         C2WQuestComplete        = 67, // C2W: hand a finished quest in
         C2WQuestAbandon         = 68, // C2W: drop a quest from the log
+
+        // --- Mounts (roadmap N) ---
+        W2CMountState           = 69, // W2C: someone mounted or dismounted - which mount, and how fast
         
         
         
