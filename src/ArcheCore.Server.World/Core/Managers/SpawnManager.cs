@@ -72,6 +72,9 @@ public class SpawnManager
     // See IWorldEntitySource.
     private readonly List<IWorldEntitySource> _entitySources = new();
 
+    /// <summary>Every NPC template by id, so pets can be summoned by template.</summary>
+    private Dictionary<int, NpcTemplate> _templates = new();
+
     // Reused across ScanSpawners' per-spawner proximity checks - safe as a
     // single field because ScanSpawners runs synchronously on one thread
     // (see class remarks) and nothing holds onto this list across calls.
@@ -103,6 +106,7 @@ public class SpawnManager
 
         var spawners  = db.NpcSpawners.ToList();
         var templates = db.NpcTemplates.ToDictionary(t => t.Id);
+        _templates = templates;
 
         foreach (var spawner in spawners)
         {
@@ -246,6 +250,26 @@ public class SpawnManager
     }
 
     public bool TryGetNpc(int networkId, out NpcEntity npc) => _npcSpawner.TryGet(networkId, out npc);
+
+    public bool TryGetTemplate(int templateId, out NpcTemplate template) =>
+        _templates.TryGetValue(templateId, out template);
+
+    /// <summary>
+    /// Spawns an NPC that belongs to no spawner - a pet (roadmap O). It has
+    /// a network id from the same range and lives in the same registries, so
+    /// visibility, interaction and despawn all work exactly as for a spawned
+    /// NPC; the only difference is that nothing will ever replace it.
+    ///
+    /// Main thread only, like every other spawn.
+    /// </summary>
+    public NpcEntity SpawnStandalone(NpcTemplate template, Vector3 position)
+    {
+        int networkId = _nextId++;
+        return _npcSpawner.SpawnFromTemplate(networkId, spawnerId: 0, template, position);
+    }
+
+    /// <summary>Removes a standalone NPC. Spawner-owned NPCs use ApplyDespawnSingle.</summary>
+    public void DespawnStandalone(int networkId) => _npcSpawner.DespawnNpc(networkId);
 
     /// <summary>
     /// Hands out an id from the NPC range for any non-player entity. One

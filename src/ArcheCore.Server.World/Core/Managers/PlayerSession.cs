@@ -86,6 +86,20 @@ namespace ArcheCore.Server.World.Managers
         /// <summary>Skill id -> Environment.TickCount64 when it's ready again.</summary>
         public readonly Dictionary<int, long> SkillCooldowns = new();
 
+        // ── Mount (roadmap N) ──
+
+        /// <summary>Mounts.Id being ridden, or 0. Not persisted: you start on foot.</summary>
+        public int MountId;
+
+        /// <summary>
+        /// What the movement check allows, relative to normal. 1 on foot, the
+        /// mount's multiplier while riding. Set only by MountManager.
+        /// </summary>
+        public float SpeedMultiplier = 1f;
+
+        /// <summary>Network id of this player's summoned pet, or 0 (roadmap O).</summary>
+        public int PetNetworkId;
+
         /// <summary>Where this player died - picks the nearest respawn point.</summary>
         public Vector3 DiedAt;
 

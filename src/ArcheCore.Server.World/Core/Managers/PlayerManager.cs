@@ -36,6 +36,14 @@ namespace ArcheCore.Server.World.Managers
         private readonly JumpEventBroadcaster _jumps;
         private readonly ItemManager _items;
 
+        /// <summary>
+        /// Set at boot by WorldServer. Properties rather than constructor
+        /// arguments because both are built after PlayerManager - the same
+        /// reason QuestManager uses a static handle.
+        /// </summary>
+        public MountManager Mounts { get; set; }
+        public PetManager Pets { get; set; }
+
         public InterestManager Interest => _interest;
         public JumpEventBroadcaster Jumps => _jumps;
         public SnapshotDispatcher Snapshots => _snapshots;
@@ -631,6 +639,13 @@ namespace ArcheCore.Server.World.Managers
                     session.Health = System.Math.Min(session.MaxHealth, session.Health + System.Math.Max(0, use.EffectValue));
                     W2CHealthUpdatePacketSender.Send(peer, session.Health, session.MaxHealth);
                     return true;
+
+                case ItemEffectType.Mount:
+                    // Toggles: using it while riding puts you back on foot.
+                    return Mounts != null && Mounts.Toggle(peer, session, use.EffectValue);
+
+                case ItemEffectType.SummonPet:
+                    return Pets != null && Pets.Toggle(peer, session, use.EffectValue);
 
                 case ItemEffectType.ApplyBuff:
                     Logger.Info($"[UseItem] STUB ApplyBuff {use.EffectValue} for account {session.AccountId} - no buff system yet");

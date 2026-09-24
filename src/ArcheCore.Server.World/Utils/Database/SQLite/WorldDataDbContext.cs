@@ -2,6 +2,7 @@ using ArcheCore.Server.World.GameData.Combat;
 using ArcheCore.Server.World.GameData.Harvest;
 using ArcheCore.Server.World.GameData.Interaction;
 using ArcheCore.Server.World.GameData.Items;
+using ArcheCore.Server.World.GameData.Mounts;
 using ArcheCore.Server.World.GameData.Loot;
 using ArcheCore.Server.World.GameData.Npcs;
 using ArcheCore.Server.World.GameData.Quests;
@@ -44,4 +45,7 @@ public class WorldDataDbContext : DbContext
 
     // Interaction actions (F/G) for every interactable
     public DbSet<InteractableAction> InteractableActions => Set<InteractableAction>();
+
+    // Mounts (roadmap N)
+    public DbSet<MountTable> Mounts => Set<MountTable>();
 }

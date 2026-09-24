@@ -10,6 +10,13 @@ namespace ArcheCore.Server.World.Networking.W2C
 {
     public static class W2CSpawnPlayerPacketSender
     {
+        private static string MountModelFor(PlayerSession subject) =>
+            subject != null && subject.MountId != 0 &&
+            MountManager.Current != null &&
+            MountManager.Current.TryGetModel(subject.MountId, out var model)
+                ? model
+                : string.Empty;
+
         public static void Send(
             ReplicationManager replication,
             NetPeer peer,
@@ -34,7 +41,11 @@ namespace ArcheCore.Server.World.Networking.W2C
                     // the client shows a nameless plate with no bar.
                     Name          = subject?.Name ?? string.Empty,
                     Health        = subject?.Health ?? 0,
-                    MaxHealth     = subject?.MaxHealth ?? 0
+                    MaxHealth     = subject?.MaxHealth ?? 0,
+
+                    // So someone riding into view is drawn mounted rather
+                    // than on foot until they next get on or off.
+                    MountModelType = MountModelFor(subject)
                 },
                 peer);
         }

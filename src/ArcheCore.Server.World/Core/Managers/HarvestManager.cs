@@ -254,6 +254,9 @@ namespace ArcheCore.Server.World.Managers
                 return;
             }
 
+            // Gathering happens on foot.
+            _players.Mounts?.Dismount(peer, session, "You dismount to gather.");
+
             node.ClaimedBy = playerId;
 
             var harvest = new ActiveHarvest

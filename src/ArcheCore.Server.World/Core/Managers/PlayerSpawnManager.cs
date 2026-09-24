@@ -108,6 +108,11 @@ namespace ArcheCore.Server.World.Managers
 
         public void CleanupPeer(NetPeer peer, bool save)
         {
+            // A pet with no owner would stand in a field forever - nothing
+            // else would ever clean it up, since no spawner owns it.
+            if (peer.Tag is PlayerSession leaving)
+                PetManager.Current?.Dismiss(leaving);
+
             if (peer.Tag is not PlayerSession { NetworkId: int networkId } session)
                 return;
 

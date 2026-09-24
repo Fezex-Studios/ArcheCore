@@ -16,6 +16,12 @@ public enum ItemEffectType
 
     /// <summary>Cast skill id EffectValue. Stubbed until skills exist (H).</summary>
     CastSkill = 3,
+
+    /// <summary>Summon/dismiss mount EffectValue (Mounts.Id). Roadmap N.</summary>
+    Mount = 4,
+
+    /// <summary>Summon/dismiss pet EffectValue (NpcTemplates.Id). Roadmap O.</summary>
+    SummonPet = 5,
 }
 
 /// <summary>
