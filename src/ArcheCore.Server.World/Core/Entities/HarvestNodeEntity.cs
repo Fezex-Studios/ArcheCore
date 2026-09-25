@@ -24,7 +24,7 @@ public class HarvestNodeEntity : IInteractable
 
     public bool IsDepleted;
 
-    /// <summary>Environment.TickCount64 at which a depleted node comes back.</summary>
+    /// <summary>ServerClock.NowMs at which a depleted node comes back.</summary>
     public long RespawnAtMs;
 
     /// <summary>

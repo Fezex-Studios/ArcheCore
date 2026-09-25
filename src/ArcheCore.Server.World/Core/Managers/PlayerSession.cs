@@ -63,7 +63,7 @@ namespace ArcheCore.Server.World.Managers
 
         /// <summary>
         /// Item cooldowns: ItemManager.CooldownKey -> expiry, in
-        /// Environment.TickCount64 milliseconds (monotonic, so a system
+        /// ServerClock.NowMs milliseconds (monotonic, so a system
         /// clock change can't unlock a potion). Keyed by group, never by
         /// slot, so moving an item can't reset its timer.
         ///
@@ -83,7 +83,7 @@ namespace ArcheCore.Server.World.Managers
         public int MaxHealth;
         public bool IsDead => MaxHealth > 0 && Health <= 0;
 
-        /// <summary>Skill id -> Environment.TickCount64 when it's ready again.</summary>
+        /// <summary>Skill id -> ServerClock.NowMs when it's ready again.</summary>
         public readonly Dictionary<int, long> SkillCooldowns = new();
 
         // ── Mount (roadmap N) ──
@@ -107,6 +107,13 @@ namespace ArcheCore.Server.World.Managers
         /// </summary>
         public ushort ZoneId;
 
+        /// <summary>
+        /// Network id of the NPC the player last opened the auction house or
+        /// mailbox at, or 0. Every auction/mail packet is checked against it
+        /// (MarketAccess) - audit H4.
+        /// </summary>
+        public int MarketTargetId;
+
         /// <summary>Where this player died - picks the nearest respawn point.</summary>
         public Vector3 DiedAt;
 
@@ -122,6 +129,21 @@ namespace ArcheCore.Server.World.Managers
         /// <summary>Set by QuestManager on any change; cleared by the save.</summary>
         public bool QuestsDirty;
 
+        /// <summary>
+        /// Quest rows loaded for quests that no longer exist in the game data.
+        /// Not shown or used - just written back with every save, so taking a
+        /// quest out of the data (temporarily, by mistake) doesn't erase
+        /// everyone's progress in it.
+        /// </summary>
+        public ArcheCore.Network.Shared.Packets.PersistenceServer.QuestStateDto[] UnknownQuestRows;
+
+        /// <summary>
+        /// Mail ids whose claim-save is in flight. A second claim of the same
+        /// mail is ignored until the first has an answer, so one mail can't be
+        /// paid out twice in memory.
+        /// </summary>
+        public readonly HashSet<long> ClaimingMail = new();
+
         /// <summary>A select/create for this peer is already in flight or done.</summary>
         public bool     SpawnRequested;
 
@@ -134,24 +156,17 @@ namespace ArcheCore.Server.World.Managers
         public int      SavedGold;
 
         /// <summary>
-        /// What the database is CONFIRMED to hold, slot for slot. This is
-        /// deliberately NOT updated the moment a save is fired off - only
-        /// once CharacterPersistence hears back that the inventory diff
-        /// was actually written. Between "fired" and "confirmed",
-        /// InventoryDirty stays true precisely so a failed or in-flight
-        /// save still gets retried with a fresh, correct diff next time,
-        /// instead of silently treating an unconfirmed write as done.
+        /// The inventory as of the last save snapshot. Every save sends the
+        /// whole inventory now (see CharacterPersistence), so this is only
+        /// kept for comparisons and debugging.
         /// </summary>
         public InventorySlot[] SavedInventory = new InventorySlot[InventoryConstants.SlotCount];
 
         /// <summary>
-        /// True whenever Inventory may differ from SavedInventory.
+        /// True whenever Inventory may differ from the last save snapshot.
         /// A bool flip, not a 20-slot array compare, because this is
-        /// checked once per player per autosave pass (AutosaveScheduler)
-        /// and a linear array compare there is the "cheap at 2 players,
-        /// not at 500" cost this field exists to avoid. Set by
-        /// TryAddItem/TryMoveItem; cleared only once a save of the
-        /// current diff is CONFIRMED (see CharacterPersistence).
+        /// checked once per player per autosave pass. Set by every inventory
+        /// change; cleared when a snapshot is taken.
         /// </summary>
         public bool InventoryDirty;
 
@@ -166,28 +181,22 @@ namespace ArcheCore.Server.World.Managers
         public int      MovementViolations;
         public double   LastCorrectionTime;
 
-        /// <summary>Moved more than 10cm, changed level, gold changed, or
-        /// inventory changed since the last confirmed save.</summary>
+        /// <summary>Moved more than 10cm, changed level, gold, inventory or
+        /// quests since the last save snapshot - or the last save failed.</summary>
         public bool IsDirty =>
             !HasBeenSaved ||
             Level != SavedLevel ||
             Gold  != SavedGold ||
             InventoryDirty ||
+            QuestsDirty ||
             Vector3.DistanceSquared(Position, SavedPosition) > 0.01f;
 
         /// <summary>
-        /// Declares the CURRENT in-memory state to be exactly what the
-        /// database holds. Correct to call right after a fresh load
-        /// (memory was just built FROM the database, so by definition
-        /// they match) or at initial spawn.
-        ///
-        /// Do NOT call this mid-save to "optimistically" mark things
-        /// saved before a send is confirmed - CharacterPersistence
-        /// handles that distinction deliberately, because gold/level/
-        /// position are idempotent full-value sends (safe to assume-then-
-        /// retry) but inventory is a diff (assuming success early means a
-        /// failed write is never resent). See CharacterPersistence for
-        /// why the two are NOT treated the same way there.
+        /// Declares the CURRENT in-memory state saved: right after a fresh
+        /// load (memory was just built from the database), or when
+        /// CharacterPersistence takes a save snapshot - which its save chain
+        /// then delivers or definitely fails (and a failure sets
+        /// HasBeenSaved back to false).
         /// </summary>
         public void MarkSaved()
         {

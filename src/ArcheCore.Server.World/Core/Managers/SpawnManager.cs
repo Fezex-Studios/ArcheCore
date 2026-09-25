@@ -50,6 +50,9 @@ public class SpawnManager
     /// </summary>
     private static readonly TimeSpan DespawnGrace = TimeSpan.FromSeconds(30);
 
+    /// <summary>InactiveSince when the spawner has players nearby (ServerClock time otherwise).</summary>
+    private static readonly TimeSpan NotInactive = TimeSpan.MinValue;
+
     /// <summary>
     /// NPC network ids start well above where player ids will ever reach
     /// (SessionManager's ids start at 1 and MaxPlayers is in the hundreds),
@@ -86,7 +89,7 @@ public class SpawnManager
         public NpcTemplate Template;
         public readonly List<int> LiveNpcIds = new();
         public bool IsActive;
-        public DateTime InactiveSince;
+        public TimeSpan InactiveSince = NotInactive;
     }
 
     public SpawnManager(
@@ -146,13 +149,13 @@ public class SpawnManager
             }
             else if (playerNearby)
             {
-                runtime.InactiveSince = default;
+                runtime.InactiveSince = NotInactive;
             }
             else
             {
-                if (runtime.InactiveSince == default)
-                    runtime.InactiveSince = DateTime.UtcNow;
-                else if (DateTime.UtcNow - runtime.InactiveSince > DespawnGrace)
+                if (runtime.InactiveSince == NotInactive)
+                    runtime.InactiveSince = ServerClock.Elapsed;
+                else if (ServerClock.Elapsed - runtime.InactiveSince > DespawnGrace)
                     toDeactivate.Add(runtime.Record.Id);
             }
         }
@@ -171,7 +174,7 @@ public class SpawnManager
             return spawned;
 
         runtime.IsActive = true;
-        runtime.InactiveSince = default;
+        runtime.InactiveSince = NotInactive;
 
         for (int i = 0; i < runtime.Record.Count; i++)
         {

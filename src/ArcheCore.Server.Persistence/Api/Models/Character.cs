@@ -16,5 +16,12 @@ namespace ArcheCore.PersistenceServer.Api.Models
         // follows it -- inventory, quest state -- copies this exact shape:
         // a column here, a field in P2W/W2P, a field on PlayerSession.
         public int Gold { get; set; }
+
+        /// <summary>
+        /// Sequence number of the last save written (see /characters/save-full).
+        /// A save is only applied if its SaveSeq is higher than this, so a late
+        /// or repeated save can never overwrite newer data.
+        /// </summary>
+        public long SaveSeq { get; set; }
     }
 }

@@ -28,13 +28,9 @@ namespace ArcheCore.Server.World.Managers
     ///   - InterestManager/SpatialGrid are NOT thread-safe and are only
     ///     ever touched from Tick(), which only WorldServer's tick loop
     ///     calls. Do not call Tick() from anywhere else.
-    ///   - The _pendingActions queue (PlayerManager.EnqueueAction) is no
-    ///     longer bridging two threads here - it's kept as-is so
-    ///     ApplyActivate/ApplyDeactivate/ApplyMove still run through the
-    ///     same drain-once-per-tick path as everything else, deferred to
-    ///     the start of next tick rather than applied inline. That one
-    ///     tick of latency is harmless and keeps this diff small; it can
-    ///     be inlined later if it's ever worth removing.
+    ///   - Moves and NPC attacks are applied inline (audit M2) - no
+    ///     closure per NPC per tick. Spawner activate/deactivate still go
+    ///     through PlayerManager.EnqueueAction; they're rare.
     ///   - Per-NPC wander state (NpcAiState) is touched only from Tick(),
     ///     so the ConcurrentDictionary is no longer required for
     ///     correctness, just left in place since a plain Dictionary buys
@@ -104,15 +100,19 @@ namespace ArcheCore.Server.World.Managers
         private readonly ConcurrentDictionary<int, NpcAiState> _active = new();
 
         // Dead NPCs waiting to be replaced: (spawner id, when). Tick thread only.
-        private readonly List<(int SpawnerId, DateTime DueAt)> _respawns = new();
+        private readonly List<(int SpawnerId, TimeSpan DueAt)> _respawns = new();
 
         // Reused every leash-heal, tick thread only.
         private readonly List<NetPeer> _healScratch = new();
         private static readonly TimeSpan DefaultRespawn = TimeSpan.FromSeconds(30);
 
-        private DateTime _lastSpawnerScan = DateTime.MinValue;
-        private DateTime _lastDecisionTick = DateTime.MinValue;
-        private DateTime _lastMoveTick = DateTime.MinValue;
+        // ServerClock times (audit M5). Never = "hasn't happened yet"; far
+        // enough in the past that the first check always fires, without the
+        // overflow TimeSpan.MinValue would give when subtracted.
+        private static readonly TimeSpan Never = TimeSpan.FromDays(-365);
+        private TimeSpan _lastSpawnerScan = Never;
+        private TimeSpan _lastDecisionTick = Never;
+        private TimeSpan _lastMoveTick = Never;
 
         /// <summary>
         /// How often an NPC picks a NEW WAYPOINT. A decision, not a
@@ -157,7 +157,7 @@ namespace ArcheCore.Server.World.Managers
             /// <summary>Player being chased, or 0. Set by aggro or by being hit.</summary>
             public int TargetPlayerId;
 
-            /// <summary>Environment.TickCount64 when this NPC may swing again.</summary>
+            /// <summary>ArcheCore.Server.World.ServerClock.NowMs when this NPC may swing again.</summary>
             public long NextAttackAtMs;
 
             /// <summary>Walking home after losing a target - won't re-aggro until it arrives.</summary>
@@ -184,9 +184,9 @@ namespace ArcheCore.Server.World.Managers
 
         public void Start()
         {
-            _lastSpawnerScan = DateTime.MinValue;
-            _lastDecisionTick = DateTime.MinValue;
-            _lastMoveTick = DateTime.MinValue;
+            _lastSpawnerScan = Never;
+            _lastDecisionTick = Never;
+            _lastMoveTick = Never;
             Logger.Info("NpcAiManager ready (movement every tick, waypoint decisions every {0}ms, spawner scan every {1}s, driven by the main tick loop).",
                 DecisionInterval.TotalMilliseconds, SpawnerScanInterval.TotalSeconds);
         }
@@ -287,7 +287,7 @@ namespace ArcheCore.Server.World.Managers
         {
             try
             {
-                var now = DateTime.UtcNow;
+                var now = ServerClock.Elapsed;
 
                 if (_respawns.Count > 0)
                     RunRespawns(now);
@@ -328,7 +328,7 @@ namespace ArcheCore.Server.World.Managers
                 // Nothing reads it yet, but melee range, aggro radius and
                 // AoE overlap all will, and none of them should be working
                 // from a position the NPC left a third of a second ago.
-                var moveDelta = _lastMoveTick == DateTime.MinValue
+                var moveDelta = _lastMoveTick == Never
                     ? TimeSpan.Zero
                     : now - _lastMoveTick;
 
@@ -421,10 +421,10 @@ namespace ArcheCore.Server.World.Managers
             _spawnManager.ApplyDespawnSingle(npc);
 
             var delay = npc.RespawnSeconds > 0 ? TimeSpan.FromSeconds(npc.RespawnSeconds) : DefaultRespawn;
-            _respawns.Add((npc.SpawnerId, DateTime.UtcNow + delay));
+            _respawns.Add((npc.SpawnerId, ServerClock.Elapsed + delay));
         }
 
-        private void RunRespawns(DateTime now)
+        private void RunRespawns(TimeSpan now)
         {
             for (int i = _respawns.Count - 1; i >= 0; i--)
             {
@@ -631,7 +631,7 @@ namespace ArcheCore.Server.World.Managers
             if (_combat == null)
                 return;
 
-            long now = Environment.TickCount64;
+            long now = ArcheCore.Server.World.ServerClock.NowMs;
 
             foreach (var state in _active.Values)
             {
@@ -644,9 +644,8 @@ namespace ArcheCore.Server.World.Managers
 
                 state.NextAttackAtMs = now + Math.Max(500, npc.AttackCooldownMs);
 
-                int npcId = state.NetworkId;
-                int playerId = state.TargetPlayerId;
-                _playerManager.EnqueueAction(() => _combat.NpcAttack(npcId, playerId));
+                // Inline, same reason as ApplyMove (audit M2).
+                _combat.NpcAttack(state.NetworkId, state.TargetPlayerId);
             }
         }
 
@@ -744,11 +743,15 @@ namespace ArcheCore.Server.World.Managers
             // a run cycle on the spot.
             var moveState = arriving ? MovementState.None : MovementState.Moving;
 
-            int id = state.NetworkId;
-            _playerManager.EnqueueAction(() => ApplyMove(id, newPos, velocity, yaw, (byte)moveState));
+            // Inline (audit M2). This used to be EnqueueAction(() => ApplyMove(...)):
+            // one closure allocation per moving NPC per tick (~20k/s at 1k
+            // NPCs) and a tick of latency, both left over from when AI ran
+            // on its own thread. Tick() now runs on the tick thread, so the
+            // move is applied right here.
+            ApplyMove(state.NetworkId, newPos, velocity, yaw, (byte)moveState);
         }
 
-        // Main thread only (enqueued). Mirrors PlayerMovementBroadcaster.BroadcastPosition,
+        // Tick thread only. Mirrors PlayerMovementBroadcaster.BroadcastPosition,
         // but for an NPC - no sender peer, and only players in entered/left get packets.
         private void ApplyMove(int networkId, Vector3 newPosition, Vector3 velocity, float yaw, byte state)
         {

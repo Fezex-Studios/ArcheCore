@@ -76,6 +76,28 @@ namespace ArcheCore.Server.World.Networking.C2W
             int     accountId,
             long    characterId)
         {
+            // Kick this account's other session (if any) and wait for every
+            // save of this character to land BEFORE reading it. Loading first
+            // is how a quick relog used to come back with items it had
+            // already sold, listed or dropped.
+            bool ready;
+
+            try
+            {
+                ready = await _playerManager.PrepareLoginAsync(peer, accountId, characterId);
+            }
+            catch (Exception e)
+            {
+                Logger.Error(e, $"[SelectCharacter] Preparing login failed for AccountId={accountId} — disconnecting");
+                ready = false;
+            }
+
+            if (!ready)
+            {
+                _playerManager.EnqueueAction(() => peer.Disconnect());
+                return;
+            }
+
             P2WCharacterLoadResponse character;
 
             try

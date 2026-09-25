@@ -6,6 +6,12 @@ using LiteNetLib;
 
 namespace ArcheCore.Server.World.Managers
 {
+    /// <summary>
+    /// Sending one message to several players. Every broadcast serialises the
+    /// payload ONCE and sends the same bytes to each recipient (audit M3) -
+    /// it used to build a new writer and re-run MessagePack per peer. The
+    /// channel comes from the opcode (PacketChannels, audit M4).
+    /// </summary>
     public class ReplicationManager
     {
         public void Broadcast<T>(
@@ -13,8 +19,7 @@ namespace ArcheCore.Server.World.Managers
             T payload,
             IEnumerable<NetPeer> peers)
         {
-            foreach (var peer in peers)
-                WorldserverPacketSender.SendPacket(peer, opcode, payload);
+            WorldserverPacketSender.SendToAll(peers, opcode, payload);
         }
 
         public void BroadcastExcept<T>(
@@ -23,11 +28,7 @@ namespace ArcheCore.Server.World.Managers
             IEnumerable<NetPeer> peers,
             NetPeer except)
         {
-            foreach (var peer in peers)
-            {
-                if (peer == except) continue;
-                WorldserverPacketSender.SendPacket(peer, opcode, payload);
-            }
+            WorldserverPacketSender.SendToAll(peers, opcode, payload, except);
         }
 
         public void Send<T>(
@@ -44,11 +45,7 @@ namespace ArcheCore.Server.World.Managers
             IEnumerable<NetPeer> peers,
             NetPeer except)
         {
-            foreach (var peer in peers)
-            {
-                if (peer == except) continue;
-                WorldserverPacketSender.SendPacket(peer, opcode, payload, DeliveryMethod.Unreliable);
-            }
+            WorldserverPacketSender.SendToAll(peers, opcode, payload, except, DeliveryMethod.Unreliable);
         }
     }
 }

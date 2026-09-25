@@ -122,14 +122,24 @@ namespace ArcheCore.Server.World.Managers
         // --- Tuning. Wire these to WorldServerConfig when you care. ---
 
         /// <summary>
-        /// Ceiling on sustained horizontal speed, world units/second.
-        /// PlayerController's moveSpeed is 5; the headroom absorbs slope
-        /// descent (a character walking downhill covers more ground per
-        /// second than its nominal speed) and CharacterController's own
-        /// depenetration nudges. RAISE THIS before adding mounts or sprint,
-        /// or every mounted player is a cheater.
+        /// Headroom over the fastest legitimate ground speed. Absorbs slope
+        /// descent (downhill covers more ground per second than the nominal
+        /// speed), CharacterController depenetration nudges and packet
+        /// jitter. The budget in BurstSeconds handles short bursts; this is
+        /// the sustained margin.
         /// </summary>
-        public float MaxHorizontalSpeed = 8f;
+        public const float SpeedHeadroom = 1.25f;
+
+        /// <summary>
+        /// Ceiling on sustained horizontal speed, world units/second:
+        /// SPRINT speed (the fastest on foot) plus headroom. It used to be a
+        /// flat 8 - exactly sprint speed with no margin - so a player
+        /// sprinting downhill was rejected and rubber-banded. Mounts widen
+        /// it further by their multiplier (see SpeedMultiplier below).
+        /// If the client's sprint speed changes, change
+        /// MovementProfile.SprintSpeed too - this follows it.
+        /// </summary>
+        public float MaxHorizontalSpeed = new MovementProfile().SprintSpeed * SpeedHeadroom;
 
         /// <summary>
         /// Ceiling on sustained upward speed. Jump impulse is
@@ -204,7 +214,7 @@ namespace ArcheCore.Server.World.Managers
         /// <summary>Monotonic seconds. NOT DateTime - that can step backwards
         /// on an NTP correction, which would hand out a negative elapsed and
         /// with it an unbounded budget refill.</summary>
-        public static double Now => Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency;
+        public static double Now => ServerClock.NowSeconds;
 
         /// <summary>
         /// Call whenever the SERVER moves a character: spawn, teleport,

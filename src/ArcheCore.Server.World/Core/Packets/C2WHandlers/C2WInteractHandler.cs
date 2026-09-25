@@ -52,6 +52,7 @@ namespace ArcheCore.Server.World.Networking.C2W
         private readonly MailManager _mail;
         private readonly AuctionManager _auctions;
         private readonly CashShopManager _cashShop;
+        private readonly MarketAccess _market;
 
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
@@ -65,8 +66,10 @@ namespace ArcheCore.Server.World.Networking.C2W
             QuestManager quests,
             MailManager mail,
             AuctionManager auctions,
-            CashShopManager cashShop)
+            CashShopManager cashShop,
+            MarketAccess market)
         {
+            _market = market;
             _mail = mail;
             _auctions = auctions;
             _cashShop = cashShop;
@@ -176,12 +179,18 @@ namespace ArcheCore.Server.World.Networking.C2W
 
                 case InteractionActionType.Mailbox:
                     if (_playerManager.TryGetSession(peer, out var mailSession))
+                    {
+                        _market.Opened(mailSession, packet.TargetNetworkId);
                         _ = _mail.SendMailboxAsync(peer, mailSession);
+                    }
                     break;
 
                 case InteractionActionType.Auction:
                     if (_playerManager.TryGetSession(peer, out var auctionSession))
+                    {
+                        _market.Opened(auctionSession, packet.TargetNetworkId);
                         _ = _auctions.BrowseAsync(peer, auctionSession, search: null, mineOnly: false);
+                    }
                     break;
 
                 case InteractionActionType.CashShop:

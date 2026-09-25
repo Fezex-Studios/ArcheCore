@@ -22,6 +22,7 @@ namespace Worldserver.ArcheCore.PersistenceServer.Scripts
         public W2PCharacterCreateSender W2PCharacterCreate { get; }
         public W2PCharacterListSender   W2PCharacterList   { get; }
         public W2PCharacterSaveSender   W2PCharacterSave   { get; }
+        public W2PCharacterSaveFullSender W2PCharacterSaveFull { get; }
         public W2PInventorySaveSender   W2PInventorySave   { get; }
         public W2PQuestSaveSender       W2PQuestSave       { get; }
         public W2PCashShopSender        W2PCashShop        { get; }
@@ -56,6 +57,7 @@ namespace Worldserver.ArcheCore.PersistenceServer.Scripts
             W2PCharacterCreate = new W2PCharacterCreateSender(this);
             W2PCharacterList   = new W2PCharacterListSender(this);
             W2PCharacterSave   = new W2PCharacterSaveSender(this);
+            W2PCharacterSaveFull = new W2PCharacterSaveFullSender(this);
             W2PInventorySave   = new W2PInventorySaveSender(this);
             W2PQuestSave       = new W2PQuestSaveSender(this);
             W2PConnect         = new W2PConnectSender(this);
@@ -72,7 +74,7 @@ namespace Worldserver.ArcheCore.PersistenceServer.Scripts
 
         // Request/response pair — Load, Create, List, Connect all use this.
         internal async Task<TResponse> PostAsync<TRequest, TResponse>(
-            string route, TRequest payload)
+            string route, TRequest payload, bool logTiming = true)
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
 
@@ -90,6 +92,7 @@ namespace Worldserver.ArcheCore.PersistenceServer.Scripts
             var result = await MessagePackSerializer.DeserializeAsync<TResponse>(stream);
             var totalMs = sw.Elapsed.TotalMilliseconds;
 
+            if (logTiming)
             Logger.Info(
                 $"[PersistenceTiming] {route} | serialize={serializeMs:F1} " +
                 $"send={sendMs:F1} openStream={openStreamMs:F1} " +

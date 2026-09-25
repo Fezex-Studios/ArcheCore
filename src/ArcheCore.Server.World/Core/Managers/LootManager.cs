@@ -166,7 +166,7 @@ namespace ArcheCore.Server.World.Managers
                 Position = npc.Position,
                 OwnerId = killerPlayerId,
                 OwnerName = ownerName,
-                ExpiresAtMs = Environment.TickCount64 + (long)CorpseLifetime.TotalMilliseconds,
+                ExpiresAtMs = ArcheCore.Server.World.ServerClock.NowMs + (long)CorpseLifetime.TotalMilliseconds,
             };
 
             var t = table.Record;
@@ -351,7 +351,7 @@ namespace ArcheCore.Server.World.Managers
             if (_corpses.Count == 0)
                 return;
 
-            long now = Environment.TickCount64;
+            long now = ArcheCore.Server.World.ServerClock.NowMs;
             _expiredScratch.Clear();
 
             foreach (var corpse in _corpses.Values)

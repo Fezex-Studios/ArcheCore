@@ -265,7 +265,7 @@ namespace ArcheCore.Server.World.Managers
                 Peer          = peer,
                 Node          = node,
                 StartPosition = session.Position,
-                CompleteAtMs  = Environment.TickCount64 + node.Template.HarvestTimeMs,
+                CompleteAtMs  = ArcheCore.Server.World.ServerClock.NowMs + node.Template.HarvestTimeMs,
             };
 
             _active[playerId] = harvest;
@@ -288,7 +288,7 @@ namespace ArcheCore.Server.World.Managers
         /// <summary>Once per tick, from WorldServer's tick loop only.</summary>
         public void Tick()
         {
-            long now = Environment.TickCount64;
+            long now = ArcheCore.Server.World.ServerClock.NowMs;
 
             if (_active.Count > 0)
                 TickHarvests(now);
@@ -392,7 +392,7 @@ namespace ArcheCore.Server.World.Managers
                 return;
 
             node.IsDepleted = true;
-            node.RespawnAtMs = Environment.TickCount64 + node.Template.RespawnSeconds * 1000L;
+            node.RespawnAtMs = ArcheCore.Server.World.ServerClock.NowMs + node.Template.RespawnSeconds * 1000L;
             _depleted.Add(node);
 
             BroadcastState(node);

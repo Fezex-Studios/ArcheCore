@@ -21,11 +21,16 @@ namespace ArcheCore.Server.World.Managers
     /// Posting mail is not done here - each sender posts to the persistence
     /// server itself.
     ///
-    /// CLAIMING IS DELETE-AND-RETURN. The persistence server deletes the mail
-    /// and returns its contents in one call; the player is only given
-    /// something when that came back true, so two clicks can't pay out
-    /// twice. If it turns out not to fit (a full bag), it's POSTED BACK
-    /// rather than lost - losing it would be the one unforgivable bug here.
+    /// CLAIMING IS ONE TRANSACTION. The contents go into the character in
+    /// memory, and then ONE save (/characters/save-full with ClaimMailId)
+    /// writes the character holding them AND deletes the mail, together. So
+    /// the database can never hold both the mail and its contents (a dupe),
+    /// nor neither (a loss) - not even if the server dies half way. The
+    /// earlier version deleted the mail first and gave the contents to an
+    /// unsaved character; a crash in between lost them.
+    ///
+    /// Something that doesn't fit isn't claimed at all - it simply stays in
+    /// the mailbox, since nothing has happened to it yet.
     /// </summary>
     public class MailManager
     {
@@ -102,37 +107,32 @@ namespace ArcheCore.Server.World.Managers
 
             try
             {
+                var response = await _persistence.W2PMail.List(session.CharacterId, session.AccountId);
+                var mailbox = response?.Mail ?? Array.Empty<MailDto>();
+
                 if (mailId != 0)
                 {
-                    await ClaimOneAsync(peer, session, mailId);
+                    var mail = Array.Find(mailbox, m => m.Id == mailId);
+
+                    // Already claimed, or never existed. Give nothing.
+                    if (mail != null && await ClaimOneAsync(peer, session, mail) == ClaimResult.DidntFit)
+                        Tell(peer, "Your inventory is full - that stayed in your mailbox.");
                 }
                 else
                 {
-                    var response = await _persistence.W2PMail.List(session.CharacterId, session.AccountId);
                     int didntFit = 0;
 
-                    foreach (var mail in response?.Mail ?? Array.Empty<MailDto>())
+                    // One at a time, in order: each claim's fit check runs on
+                    // the tick thread after the previous claim's contents were
+                    // added, so it sees the bag as it really is by then.
+                    foreach (var mail in mailbox)
                     {
-                        // Skip anything that won't fit instead of claiming it and posting it straight
-                        // back. The tick thread runs these checks in order, after the adds queued by the
-                        // claims before them, so each check sees the bag as it really is by then.
-                        if (mail.ItemTemplateId != 0 && mail.ItemQuantity > 0)
-                        {
-                            var (itemId, quantity) = (mail.ItemTemplateId, mail.ItemQuantity);
-
-                            if (!await OnTickThreadAsync(() => _players.CanAddItem(peer, itemId, quantity)))
-                            {
-                                didntFit++;
-                                continue;
-                            }
-                        }
-
-                        await ClaimOneAsync(peer, session, mail.Id);
+                        if (await ClaimOneAsync(peer, session, mail) == ClaimResult.DidntFit)
+                            didntFit++;
                     }
 
                     if (didntFit > 0)
-                        _enqueueOnTickThread(() => W2CMarketResultPacketSender.Send(peer, false,
-                            $"Your inventory is full - {didntFit} piece(s) of mail stayed in your mailbox."));
+                        Tell(peer, $"Your inventory is full - {didntFit} piece(s) of mail stayed in your mailbox.");
                 }
             }
             catch (Exception ex)
@@ -143,72 +143,143 @@ namespace ArcheCore.Server.World.Managers
             await SendMailboxAsync(peer, session);
         }
 
-        private async Task ClaimOneAsync(NetPeer peer, PlayerSession session, long mailId)
+        private enum ClaimResult { Claimed, DidntFit, NotClaimed }
+
+        private async Task<ClaimResult> ClaimOneAsync(NetPeer peer, PlayerSession session, MailDto mail)
         {
-            var response = await _persistence.W2PMail.Claim(session.CharacterId, session.AccountId, mailId);
+            bool hasItem = mail.ItemTemplateId != 0 && mail.ItemQuantity > 0;
 
-            // Someone else got it, or it never existed. Give nothing.
-            if (response is not { Claimed: true, Mail: not null })
-                return;
-
-            var mail = response.Mail;
-
-            _enqueueOnTickThread(() =>
+            // 1. On the tick thread: does it fit? Then put it in the
+            //    character and snapshot a save that also deletes the mail.
+            var (result, save) = await OnTickThreadAsync<(ClaimResult, Task<SaveOutcome>)>(() =>
             {
-                // Gold and inventory are tick-thread only.
-                if (mail.Gold > 0 && !_players.TryAddGold(peer, mail.Gold))
+                // Left, or this very mail is already being claimed (a double click).
+                if (peer.Tag != session || session.NetworkId == null || !session.ClaimingMail.Add(mail.Id))
+                    return (ClaimResult.NotClaimed, null);
+
+                bool fits = (long)session.Gold + Math.Max(0, mail.Gold) <= int.MaxValue &&
+                            (!hasItem || _players.CanAddItem(peer, mail.ItemTemplateId, mail.ItemQuantity));
+
+                if (!fits)
                 {
-                    // The row is already deleted, so this exists only here: post ALL of it back.
-                    _ = PostBackAsync(session, mail.Sender, mail.Subject, mail.Gold, mail.ItemTemplateId, mail.ItemQuantity,
-                                      "gold would overflow");
-                    return;
+                    session.ClaimingMail.Remove(mail.Id);
+                    return (ClaimResult.DidntFit, null);
                 }
 
-                if (mail.ItemTemplateId != 0 && mail.ItemQuantity > 0 &&
-                    !_players.TryAddItem(peer, mail.ItemTemplateId, mail.ItemQuantity))
-                {
-                    // Gold (if any) is already in the purse, so only the item goes back.
-                    _ = PostBackAsync(session, mail.Sender, mail.Subject, 0, mail.ItemTemplateId, mail.ItemQuantity,
-                                      "inventory full");
-                    W2CMarketResultPacketSender.Send(peer, false, "Your inventory is full - that stayed in your mailbox.", refresh: 3);
-                    return;
-                }
+                if (mail.Gold > 0)
+                    _players.TryAddGold(peer, mail.Gold);
 
-                string taken = mail.Gold > 0 ? $"{mail.Gold}g" : "";
-                if (mail.ItemTemplateId != 0)
-                    taken = string.IsNullOrEmpty(taken)
-                        ? $"{mail.ItemQuantity}x {ItemName(mail.ItemTemplateId)}"
-                        : $"{taken}, {mail.ItemQuantity}x {ItemName(mail.ItemTemplateId)}";
+                if (hasItem)
+                    _players.TryAddItem(peer, mail.ItemTemplateId, mail.ItemQuantity);
 
-                if (!string.IsNullOrEmpty(taken))
-                    W2CInteractLootPacketSender.Send(peer, taken);
+                return (ClaimResult.Claimed, _players.SaveClaimingMailAsync(session, mail.Id));
             });
+
+            if (save == null)
+                return result;
+
+            // 2. Wait for the database. The save chain retries until it has a
+            //    definite answer, so this is either "saved and deleted" or
+            //    "definitely nothing written".
+            var outcome = await save;
+
+            await OnTickThreadAsync(() =>
+            {
+                session.ClaimingMail.Remove(mail.Id);
+
+                if (outcome == SaveOutcome.Saved)
+                {
+                    string taken = Describe(mail);
+                    if (peer.Tag == session && taken.Length > 0)
+                        W2CInteractLootPacketSender.Send(peer, taken);
+                    return true;
+                }
+
+                // Nothing was written, so the mail is still there (or was
+                // never there). Take the contents back out of the character,
+                // or the next ordinary save would write them in for free.
+                TakeBack(peer, session, mail);
+                return true;
+            });
+
+            if (outcome != SaveOutcome.Saved)
+            {
+                Logger.Warn($"[Mail] Claim of mail {mail.Id} for character {session.CharacterId} was not saved " +
+                            $"({outcome}); its contents were taken back.");
+                return ClaimResult.NotClaimed;
+            }
+
+            return ClaimResult.Claimed;
         }
 
         /// <summary>
-        /// Back into the mailbox it came from. The last line of defence
-        /// against losing anything, so it must not throw - and if it can't
-        /// do its job, it says so loudly.
+        /// Undo a claim that didn't save. Tick thread only. Works on the
+        /// session itself (not through the peer), because the player may
+        /// have logged out while the save was running - and then a fresh
+        /// save is queued, since the logout save already captured the
+        /// contents.
         /// </summary>
-        private async Task PostBackAsync(PlayerSession session, string sender, string subject,
-                                         int gold, int itemTemplateId, int quantity, string why)
+        private void TakeBack(NetPeer peer, PlayerSession session, MailDto mail)
         {
-            Logger.Info($"[Mail] Returning mail to character {session.CharacterId} ({why})");
+            bool online = peer.Tag == session && session.NetworkId != null;
 
-            try
+            int gold = Math.Min(Math.Max(0, mail.Gold), session.Gold);
+            if (gold > 0)
             {
-                var result = await _persistence.W2PMail.Send(session.CharacterId, sender, subject, gold, itemTemplateId, quantity);
+                if (online) _players.TryAddGold(peer, -gold);
+                else session.Gold -= gold;
+            }
 
-                if (result is not { Sent: true })
-                    Logger.Error($"[Mail] LOST GOODS: the mailbox refused {quantity}x item {itemTemplateId} " +
-                                 $"(+{gold}g) for character {session.CharacterId}: {result?.Reason}");
-            }
-            catch (Exception ex)
+            int toRemove = mail.ItemTemplateId != 0 ? Math.Max(0, mail.ItemQuantity) : 0;
+
+            for (int i = 0; i < session.Inventory.Length && toRemove > 0; i++)
             {
-                Logger.Error($"[Mail] LOST GOODS: could not return {quantity}x item {itemTemplateId} " +
-                             $"(+{gold}g) to character {session.CharacterId}: {ex.Message}");
+                if (session.Inventory[i].ItemTemplateId != mail.ItemTemplateId)
+                    continue;
+
+                int take = Math.Min(toRemove, session.Inventory[i].Quantity);
+
+                if (online)
+                {
+                    if (_players.TryTakeFromSlot(peer, i, take, out _, out int removed))
+                        toRemove -= removed;
+                }
+                else
+                {
+                    session.Inventory[i].Quantity -= take;
+                    if (session.Inventory[i].Quantity <= 0)
+                        session.Inventory[i] = default;
+                    session.InventoryDirty = true;
+                    toRemove -= take;
+                }
             }
+
+            if (gold < mail.Gold || toRemove > 0)
+                Logger.Error($"[Mail] Could not fully take back unsaved mail {mail.Id} from character {session.CharacterId} " +
+                             $"(missing {mail.Gold - gold}g, {toRemove}x item {mail.ItemTemplateId}) - already spent.");
+
+            if (!online)
+                _players.SaveInBackground(session);
         }
+
+        private string Describe(MailDto mail)
+        {
+            string taken = mail.Gold > 0 ? $"{mail.Gold}g" : "";
+
+            if (mail.ItemTemplateId != 0)
+                taken = string.IsNullOrEmpty(taken)
+                    ? $"{mail.ItemQuantity}x {ItemName(mail.ItemTemplateId)}"
+                    : $"{taken}, {mail.ItemQuantity}x {ItemName(mail.ItemTemplateId)}";
+
+            return taken;
+        }
+
+        private void Tell(NetPeer peer, string message) =>
+            _enqueueOnTickThread(() =>
+            {
+                if (peer.ConnectionState == ConnectionState.Connected)
+                    W2CMarketResultPacketSender.Send(peer, false, message, refresh: 3);
+            });
 
         /// <summary>Run something on the tick thread and wait for its answer, without blocking that thread.</summary>
         private Task<T> OnTickThreadAsync<T>(Func<T> work)

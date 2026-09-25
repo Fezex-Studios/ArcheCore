@@ -119,56 +119,83 @@ namespace ArcheCore.Server.World.Managers
         public void RunAutosave(uint tick) => _autosave.Tick(tick);
 
         /// <summary>
-        /// Shutdown only - call AFTER the tick loop has stopped. Saves
-        /// every in-world dirty character and waits for all of them.
-        ///
-        /// Unlike the normal background save path, this assumes success
-        /// once the send completes without throwing (checked below via
-        /// baseOk/inventoryOk, logged but not retried) - there IS no next
-        /// autosave to retry on at shutdown, so a failed save here can
-        /// only be reported, not recovered. That's why the ordinary path
-        /// in CharacterPersistence is careful about NOT marking inventory
-        /// saved early and this one doesn't need to be: there's nothing
-        /// left to protect once the process is exiting anyway.
+        /// Shutdown only - call AFTER the tick loop has stopped. Queues a
+        /// final save for every dirty in-world character and waits for every
+        /// character's save queue to empty - including disconnect saves of
+        /// players who already left. See CharacterPersistence.
         /// </summary>
-        public async Task SaveAllAsync()
+        public Task SaveAllAsync() => SaveAllAsync(TimeSpan.FromSeconds(9));
+
+        public Task SaveAllAsync(TimeSpan timeout)
         {
-            var saves = new List<Task<(bool baseOk, bool inventoryOk)>>();
-            var descriptions = new List<string>();
+            var sessions = new List<PlayerSession>();
 
             foreach (var peer in _sessions.GetAllConnectedPeers())
+                if (peer.Tag is PlayerSession { NetworkId: not null } s)
+                    sessions.Add(s);
+
+            return _persistence.SaveAllAndWaitAsync(sessions, timeout);
+        }
+
+        /// <summary>
+        /// How long a login waits for the character's earlier saves (a
+        /// disconnect a moment ago, or a kicked duplicate login) to reach
+        /// the database before giving up. Loading before they land is how
+        /// a relog used to resurrect items.
+        /// </summary>
+        public static readonly TimeSpan LoginSaveWait = TimeSpan.FromSeconds(20);
+
+        /// <summary>
+        /// Any thread. Run BEFORE loading a character: kicks this account's
+        /// other in-world connection (queueing its final save), then waits
+        /// until every save of <paramref name="characterId"/> has a definite
+        /// answer. False = still not settled; don't load.
+        /// </summary>
+        public async Task<bool> PrepareLoginAsync(NetPeer peer, int accountId, long characterId)
+        {
+            await OnTickThreadAsync(() =>
             {
-                if (peer.Tag is not PlayerSession { NetworkId: not null } s || !s.IsDirty)
-                    continue;
-
-                InventorySlotDto[] diff = s.InventoryDirty
-                    ? CharacterPersistence.ComputeInventoryDiff(s)
-                    : Array.Empty<InventorySlotDto>();
-
-                saves.Add(_persistence.SaveAsync(s.CharacterId, s.AccountId, s.Name, s.Level, s.Position, s.Gold, diff));
-                descriptions.Add($"CharacterId={s.CharacterId}");
-
-                s.MarkSaved();
-            }
-
-            if (saves.Count == 0) return;
-
-            Logger.Info($"[Shutdown] Saving {saves.Count} character(s)...");
-            var results = await Task.WhenAll(saves);
-
-            int failed = 0;
-            for (int i = 0; i < results.Length; i++)
-            {
-                var (baseOk, inventoryOk) = results[i];
-                if (!baseOk || !inventoryOk)
+                if (_sessions.TryGetAccountPeer(accountId, out var existing) && existing != peer)
                 {
-                    failed++;
-                    Logger.Error($"[Shutdown] {descriptions[i]} FAILED (base={baseOk}, inventory={inventoryOk}).");
+                    Logger.Info($"[Login] Account={accountId} logging in again - disconnecting the previous connection first.");
+                    _spawn.CleanupPeer(existing, true);
+                    existing.Disconnect();
                 }
-            }
 
-            if (failed == 0) Logger.Info("[Shutdown] All characters saved.");
-            else             Logger.Error($"[Shutdown] {failed} of {results.Length} character save(s) FAILED.");
+                return true;
+            });
+
+            bool settled = await _persistence.WhenSettledAsync(characterId, LoginSaveWait);
+
+            if (!settled)
+                Logger.Warn($"[Login] CharacterId={characterId}: earlier saves still not confirmed after " +
+                            $"{LoginSaveWait.TotalSeconds:F0}s - login refused (is the persistence server up?).");
+
+            return settled;
+        }
+
+        /// <summary>Queue a save; see CharacterPersistence.SaveInBackground. Tick thread only.</summary>
+        public void SaveInBackground(PlayerSession session) => _persistence.SaveInBackground(session);
+
+        /// <summary>Write-through save; see CharacterPersistence.SaveNowAsync. Tick thread only.</summary>
+        public Task<SaveOutcome> SaveNowAsync(PlayerSession session) => _persistence.SaveNowAsync(session);
+
+        /// <summary>See CharacterPersistence.SaveClaimingMailAsync. Tick thread only.</summary>
+        public Task<SaveOutcome> SaveClaimingMailAsync(PlayerSession session, long mailId) =>
+            _persistence.SaveClaimingMailAsync(session, mailId);
+
+        /// <summary>Run something on the tick thread and wait for its answer, without blocking that thread.</summary>
+        public Task<T> OnTickThreadAsync<T>(Func<T> work)
+        {
+            var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            EnqueueAction(() =>
+            {
+                try { completion.SetResult(work()); }
+                catch (Exception ex) { completion.SetException(ex); }
+            });
+
+            return completion.Task;
         }
 
         public bool TryGetSession(NetPeer peer, out PlayerSession session) =>
@@ -187,6 +214,8 @@ namespace ArcheCore.Server.World.Managers
             _sessions.GetPendingAccountId(peer);
         public bool TryBeginSpawn(NetPeer peer) =>
             _sessions.TryBeginSpawn(peer);
+        public void CancelSpawn(NetPeer peer) =>
+            _sessions.CancelSpawn(peer);
         public int GetLevel(NetPeer peer) => _sessions.GetLevel(peer);
         public long GetCharacterId(NetPeer peer) => _sessions.GetCharacterId(peer);
         public string GetName(NetPeer peer) => _sessions.GetName(peer);
@@ -659,7 +688,7 @@ namespace ArcheCore.Server.World.Managers
                 return false;
 
             // 3
-            long now = Environment.TickCount64;
+            long now = ArcheCore.Server.World.ServerClock.NowMs;
             int cooldownKey = ItemManager.CooldownKey(use);
 
             if (session.ItemCooldowns.TryGetValue(cooldownKey, out long readyAt) && now < readyAt)
