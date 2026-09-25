@@ -87,6 +87,20 @@
         C2WQuestComplete        = 67, // C2W: hand a finished quest in
         C2WQuestAbandon         = 68, // C2W: drop a quest from the log
 
+        // --- Market: auction house, cash shop, mailbox (roadmap P) ---
+        W2CMailList             = 70, // W2C: this character's mailbox contents
+        C2WMailClaim            = 71, // C2W: take one piece of mail (0 = take all, negative = just show me)
+        W2CAuctionList          = 72, // W2C: auction listings
+        C2WAuctionBrowse        = 73, // C2W: show me the board
+        C2WAuctionCreate        = 74, // C2W: list an item from my bag
+        C2WAuctionBuy           = 75, // C2W: buy a listing
+        C2WAuctionCancel        = 76, // C2W: take my own listing down
+        W2CMarketResult         = 77, // W2C: what happened, in words (auction, cash shop and mail all use it)
+        C2WCashShopBrowse       = 78, // C2W: show me the cash shop
+        W2CCashShopList         = 79, // W2C: cash shop items, and my balance
+        C2WCashShopBuy          = 80, // C2W: buy a cash shop item
+        C2WCashShopGift         = 81, // C2W: buy a cash shop item as a gift for another character
+
         // --- Mounts (roadmap N) ---
         W2CMountState           = 69, // W2C: someone mounted or dismounted - which mount, and how fast
         

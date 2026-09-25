@@ -4,5 +4,6 @@
   <Project Path="src/ArcheCore.Server.World/ArcheCore.Server.World.csproj" />
   <Project Path="src/ArcheCore.Server.Auth/ArcheCore.Server.Auth.csproj" />
   <Project Path="src/ArcheCore.Server.Persistence/ArcheCore.Server.Persistence.csproj" />
+  <Project Path="src/ArcheCore.Server.Auction/ArcheCore.Server.Auction.csproj" />
   <Project Path="src/LoadTester/LoadTester.csproj" />
 </Solution>

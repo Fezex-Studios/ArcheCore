@@ -19,6 +19,9 @@ namespace ArcheCore.Network.Shared.Packets.W2C
         OpenLoot  = 5,   // corpse: open the loot window
         Climb     = 6,   // placeholder - listed, greyed out, not implemented yet
         Quests    = 7,   // open this NPC's quest list (offers, hand-ins)
+        Mailbox   = 8,   // open the mailbox at this NPC
+        Auction   = 9,   // open the auction house at this NPC
+        CashShop  = 10,  // open the cash shop
     }
 
     [MessagePackObject(true)]

@@ -24,6 +24,8 @@ namespace Worldserver.ArcheCore.PersistenceServer.Scripts
         public W2PCharacterSaveSender   W2PCharacterSave   { get; }
         public W2PInventorySaveSender   W2PInventorySave   { get; }
         public W2PQuestSaveSender       W2PQuestSave       { get; }
+        public W2PCashShopSender        W2PCashShop        { get; }
+        public W2PMailSender            W2PMail            { get; }
         public W2PConnectSender         W2PConnect         { get; }
         public W2PHelloWorldSender      W2PHelloWorld      { get; }
 
@@ -58,6 +60,8 @@ namespace Worldserver.ArcheCore.PersistenceServer.Scripts
             W2PQuestSave       = new W2PQuestSaveSender(this);
             W2PConnect         = new W2PConnectSender(this);
             W2PHelloWorld      = new W2PHelloWorldSender(this);
+            W2PCashShop        = new W2PCashShopSender(this);
+            W2PMail            = new W2PMailSender(this);
         }
 
         public async Task Start()
