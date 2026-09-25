@@ -22,6 +22,9 @@ namespace ArcheCore.Server.World.Managers
     /// </summary>
     public class PlayerSpawnManager
     {
+        /// <summary>Sent in EnterWorld so the client can check its zone map copy. Set by PlayerManager.</summary>
+        public string ZoneMapHash { get; set; } = "";
+
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
         private readonly SessionManager _sessions;
@@ -233,7 +236,15 @@ namespace ArcheCore.Server.World.Managers
                 session.Gold,
                 session.Inventory,
                 session.Health,
-                session.MaxHealth);
+                session.MaxHealth,
+                new WorldSettingsData
+                {
+                    ShardName             = _worldConfig.ShardName ?? "",
+                    TileSize              = ArcheCore.Movement.World.WorldGrid.TileSize,
+                    InterestSpawnRadius   = _interest.SpawnRadius,
+                    InterestDespawnRadius = _interest.DespawnRadius,
+                    ZoneMapHash           = ZoneMapHash ?? ""
+                });
 
             // Quest state arrives in the same load response as the inventory.
             // The catalogue and log follow EnterWorld, so the client has the

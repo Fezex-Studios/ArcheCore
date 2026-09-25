@@ -49,19 +49,63 @@ public class WorldServerConfig
     public string AuctionServerUrl { get; set; } = "http://127.0.0.1:5090";
 
     /// <summary>
-    /// Path to this zone's exported terrain heightmap (see
-    /// TerrainHeightmapExporter / HeightmapData), used by MovementValidator
-    /// to reject positions it can prove are below the actual ground -
-    /// see that class's remarks on why the speed budget alone can't.
+    /// This world server's shard name, shown to players (launcher realm
+    /// list, character select, the HUD). ONE WORLD SERVER PER SHARD: a
+    /// shard is one seamless world run by one process - "Kyrios" is one
+    /// WorldServer, a second shard is a second process with its own
+    /// config, its own port and its own persistence rows.
+    /// </summary>
+    public String ShardName { get; set; } = "Dev";
+
+    /// <summary>
+    /// Folder of exported terrain heightmaps (*.achtmap) for the whole
+    /// shard - one file per Unity Terrain, any number of them, exported by
+    /// Dev Tools > World Tiles > Export All Terrain. They are stitched into
+    /// one seamless height field (TiledHeightField) and used by
+    /// MovementValidator to reject positions below the ground, and by NPC
+    /// AI to walk on the terrain instead of on a flat plane.
     ///
-    /// Empty/null is a supported, non-fatal state: the zone simply runs
-    /// without terrain validation, same as before this existed. That
-    /// matters for interiors and instances, which have no open terrain to
-    /// export in the first place - don't point this at anything for those.
-    /// One heightmap per outdoor zone; a multi-zone shard needs one
-    /// WorldServerConfig (or one HeightmapTerrainPath) per zone process.
+    /// Relative paths resolve against the server's own folder. A missing
+    /// or empty folder is a supported state: the shard simply runs without
+    /// terrain validation. Interiors and instances have no heightmap and
+    /// are never validated against one.
+    /// </summary>
+    public String TerrainDirectory { get; set; } = "Data/terrain_data";
+
+    /// <summary>
+    /// LEGACY single-file setting, from before the world was partitioned.
+    /// Still honoured - the file is added to the same stitched field - so
+    /// existing configs keep working. Prefer TerrainDirectory.
     /// </summary>
     public String HeightmapTerrainPath { get; set; } = String.Empty;
+
+    /// <summary>
+    /// True loads every heightmap at boot. False (default) loads each one
+    /// the first time a player or NPC needs it and unloads it after
+    /// TerrainIdleUnloadMinutes unused - the right choice once the world is
+    /// bigger than a handful of tiles, since a full continent of heightmaps
+    /// is gigabytes and only the areas with people in them matter.
+    /// </summary>
+    public bool PreloadAllTerrain { get; set; } = false;
+
+    /// <summary>How long an unused heightmap stays in memory. See PreloadAllTerrain.</summary>
+    public int TerrainIdleUnloadMinutes { get; set; } = 10;
+
+    /// <summary>
+    /// NPCs follow the terrain height while they walk, where terrain data
+    /// exists. Off keeps the old behaviour (NPCs keep the Y they spawned
+    /// at), for debugging.
+    /// </summary>
+    public bool NpcGroundSnap { get; set; } = true;
+
+    /// <summary>
+    /// The shard's zone map (*.aczmap), painted and saved by Dev Tools >
+    /// Zones: which zone every point of the world is in, plus each zone's
+    /// name, level range and PvP mode. The client ships its own copy in
+    /// StreamingAssets; the two are compared by hash on entering the world.
+    /// Missing is fine - the whole shard is simply "no zone".
+    /// </summary>
+    public String ZoneMapPath { get; set; } = "Data/world/zones.aczmap";
 
     /// <summary>
     /// Called once at boot, before the socket opens. Every check here is

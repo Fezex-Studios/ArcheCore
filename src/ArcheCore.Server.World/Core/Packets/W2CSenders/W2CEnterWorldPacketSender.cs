@@ -18,7 +18,7 @@ namespace ArcheCore.Server.World.Networking.W2C
     /// </summary>
     public static class W2CEnterWorldPacketSender
     {
-        public static void Send(NetPeer peer, CharacterData character, int gold, InventorySlot[] inventory, int health, int maxHealth)
+        public static void Send(NetPeer peer, CharacterData character, int gold, InventorySlot[] inventory, int health, int maxHealth, WorldSettingsData world)
         {
             var slots = new InventorySlotData[inventory.Length];
 
@@ -41,7 +41,8 @@ namespace ArcheCore.Server.World.Networking.W2C
                     Gold      = gold,
                     Inventory = slots,
                     Health    = health,
-                    MaxHealth = maxHealth
+                    MaxHealth = maxHealth,
+                    World     = world
                 });
         }
     }

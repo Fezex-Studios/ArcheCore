@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using ArcheCore.Network.Shared.Packets.PersistenceServer;
 using ArcheCore.Network.Shared.Packets.PersistenceServer.P2W;
 using ArcheCore.Server.World.Core.Interaction;
+using ArcheCore.Server.World.Core.World;
 using ArcheCore.Server.World.GameData.Items;
 using ArcheCore.Server.World.Lua.Scripting;
 using ArcheCore.Server.World.Lua.Scripting.Bindings;
@@ -35,6 +36,8 @@ namespace ArcheCore.Server.World.Managers
         private readonly MovementValidator _validator;
         private readonly JumpEventBroadcaster _jumps;
         private readonly ItemManager _items;
+        private readonly WorldTerrainService _terrain;
+        private readonly ZoneService _zones;
 
         /// <summary>
         /// Set at boot by WorldServer. Properties rather than constructor
@@ -47,6 +50,8 @@ namespace ArcheCore.Server.World.Managers
         public InterestManager Interest => _interest;
         public JumpEventBroadcaster Jumps => _jumps;
         public SnapshotDispatcher Snapshots => _snapshots;
+        public WorldTerrainService Terrain => _terrain;
+        public ZoneService Zones => _zones;
 
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
@@ -60,11 +65,15 @@ namespace ArcheCore.Server.World.Managers
             PersistenceClient persistence,
             DemoManager demoManager,
             InterestManager interest,
-            ItemManager items)
+            ItemManager items,
+            WorldTerrainService terrain,
+            ZoneService zones)
         {
+            _zones = zones;
             _replication = replication;
             _items = items;
             _interest = interest;
+            _terrain = terrain;
 
             _sessions = new SessionManager();
             _persistence = new CharacterPersistence(persistence, EnqueueAction);
@@ -75,7 +84,11 @@ namespace ArcheCore.Server.World.Managers
             _snapshots = new SnapshotDispatcher(
                 _sessions, _interest, (ushort)ArcheCore.Library.Net.Worldserver.Opcodes.W2CWorldSnapshot);
 
-            _validator = new MovementValidator(_replication);
+            // The shard's stitched terrain, when it has any. This is the line
+            // that finally makes HeightmapTerrainPath/TerrainDirectory do
+            // something - the validator had a terrain check all along, but
+            // was always constructed without the terrain to check against.
+            _validator = new MovementValidator(_replication, terrain?.Collision);
             _jumps = new JumpEventBroadcaster(_sessions, _interest, _replication, _clock);
 
             _movement = new PlayerMovementBroadcaster(
@@ -85,6 +98,8 @@ namespace ArcheCore.Server.World.Managers
                 _sessions, _persistence, _replication, _interest,
                 _luaEngine, worldConfig, demoManager, spawnManager,
                 _snapshots, _clock, _jumps);
+
+            _spawn.ZoneMapHash = zones?.Hash ?? "";
         }
 
         public void InitializeScripts() => _luaEngine.LoadAllScripts(Lua);
@@ -178,8 +193,43 @@ namespace ArcheCore.Server.World.Managers
 
         public void HandlePlayerConnected(
             NetPeer peer, int accountId, P2WCharacterLoadResponse character,
-            bool isNewCharacter = false) =>
+            bool isNewCharacter = false)
+        {
+            // Heights at the spawn point, before the first movement packet
+            // from there has to wait on a disk read.
+            _terrain?.Prefetch(new Vector3(character.X, character.Y, character.Z));
             _spawn.HandlePlayerConnected(peer, accountId, character, isNewCharacter);
+
+            // Which zone they logged in to - fires OnEnterZone from "no zone",
+            // so quests and scripts see arriving the same as walking in.
+            UpdateZone(peer);
+        }
+
+        /// <summary>
+        /// Re-checks which zone this player is in and fires
+        /// PlayerEvent.OnEnterZone if it changed. One dictionary lookup and an
+        /// array read, so it runs on every accepted movement packet.
+        /// </summary>
+        private void UpdateZone(NetPeer peer)
+        {
+            if (_zones == null || !_sessions.TryGetSession(peer, out var session) || session.NetworkId == null)
+                return;
+
+            ushort zoneId = _zones.ZoneIdAt(session.Position);
+            if (zoneId == session.ZoneId)
+                return;
+
+            ushort previous = session.ZoneId;
+            session.ZoneId = zoneId;
+
+            var zone = _zones.GetZone(zoneId);
+            Logger.Debug("[Zones] {Name} entered {Zone} (from {Previous})",
+                session.Name, zone?.Key ?? "no zone", _zones.GetZone(previous)?.Key ?? "no zone");
+
+            var player = CreateLuaPlayer(peer);
+            if (player != null)
+                _luaEngine.FireEvent(PlayerEvent.OnEnterZone, player, (int)zoneId, zone?.Key ?? "", (int)previous);
+        }
 
         public void HandlePlayerDisconnected(NetPeer peer) =>
             _spawn.HandlePlayerDisconnected(peer);
@@ -190,8 +240,11 @@ namespace ArcheCore.Server.World.Managers
         public void BroadcastPosition(
             NetPeer sender, int networkId, Vector3 position,
             Vector3 velocity = default, float yaw = 0f,
-            float pitch = 0f, float roll = 0f, byte state = 0) =>
+            float pitch = 0f, float roll = 0f, byte state = 0)
+        {
             _movement.BroadcastPosition(sender, networkId, position, velocity, yaw, pitch, roll, state);
+            UpdateZone(sender);
+        }
 
         /// <summary>Dead players don't move. The client locks input too; this is the authority.</summary>
         public bool TryAcceptMovementChecked(NetPeer peer, PlayerSession session, Vector3 position, Vector3 velocity) =>
@@ -202,6 +255,39 @@ namespace ArcheCore.Server.World.Managers
 
         public void NotifyAuthoritativeMove(PlayerSession session, Vector3 position) =>
             _validator.NotifyAuthoritativeMove(session, position);
+
+        /// <summary>
+        /// Moves a player anywhere in the shard, server-authoritatively:
+        /// respawn at a graveyard, a teleport scroll, a GM summon, a portal.
+        ///
+        /// One call does every part of it, because each part forgotten is
+        /// its own bug in a seamless world:
+        ///   - the destination's terrain is loaded before they land on it,
+        ///   - the validator accepts the jump instead of flagging a teleport,
+        ///   - the interest grid moves them, so the people and NPCs at the
+        ///     destination appear and the ones they left disappear (before
+        ///     this, a respawn left the player "visible" at their corpse
+        ///     until their next movement packet),
+        ///   - the snapshot store has the new position for observers.
+        ///
+        /// The CLIENT still needs telling separately - a respawn packet, a
+        /// position correction - because what it should do on arrival (close
+        /// a death screen, play an effect) depends on why it moved.
+        /// </summary>
+        public void TeleportPlayer(NetPeer peer, PlayerSession session, Vector3 destination)
+        {
+            if (session.NetworkId is not int networkId)
+                return;
+
+            _terrain?.Prefetch(destination);
+            _validator.NotifyAuthoritativeMove(session, destination);
+
+            // The same path an accepted movement packet takes: session
+            // position, interest enter/leave, snapshot transform. Zero
+            // velocity so nobody extrapolates the arrival onward.
+            _movement.BroadcastPosition(peer, networkId, destination, Vector3.Zero);
+            UpdateZone(peer);
+        }
 
         /// <summary>
         /// Puts a PLAYER somewhere authoritatively (respawn). The snapshot
