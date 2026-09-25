@@ -69,7 +69,6 @@ public class WorldServer : IHostedService, INetEventListener
     private readonly AuthService _authService;
     private readonly SpawnPointService _spawnPoints;
 
-    private const string ConnectionKey = "MMO";
 
     // How long shutdown waits for the final character saves.
     private static readonly TimeSpan ShutdownSaveTimeout = TimeSpan.FromSeconds(10);
@@ -404,9 +403,32 @@ public class WorldServer : IHostedService, INetEventListener
         _rateLimiter.Forget(peer.Id);
     }
 
+    /// <summary>
+    /// The connection key carries the protocol version (ProtocolVersion). A
+    /// client built against another ArcheCore.Network.dll is turned away
+    /// here, with a message it shows the player, instead of failing on its
+    /// first packet.
+    /// </summary>
     public void OnConnectionRequest(ConnectionRequest request)
     {
-        request.AcceptIfKey(ConnectionKey);
+        string key = null;
+        try { key = request.Data.GetString(); } catch { /* not even a string - not our client */ }
+
+        if (key == ArcheCore.Network.Shared.ProtocolVersion.ConnectionKey)
+        {
+            request.Accept();
+            return;
+        }
+
+        int theirs = ArcheCore.Network.Shared.ProtocolVersion.Parse(key);
+        Logger.Warn($"[Net] Refused {request.RemoteEndPoint}: protocol {(theirs < 0 ? "unknown" : theirs.ToString())}, " +
+                    $"server is {ArcheCore.Network.Shared.ProtocolVersion.Current}.");
+
+        var reason = new LiteNetLib.Utils.NetDataWriter();
+        reason.Put(theirs < 0
+            ? "This client can't talk to this server. Update the game."
+            : $"Your client is out of date (protocol {theirs}, server {ArcheCore.Network.Shared.ProtocolVersion.Current}). Update the game.");
+        request.Reject(reason);
     }
 
     /// <summary>

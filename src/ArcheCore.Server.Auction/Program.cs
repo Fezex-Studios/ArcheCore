@@ -37,6 +37,15 @@ using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// ── Secrets (audit gap 3) ────────────────────────────────────────────
+// Real secrets and passwords live in appsettings.Local.json next to this
+// file (git-ignored; copy appsettings.Local.example.json) or in environment
+// variables - never in appsettings.json, which is committed. Environment
+// variables are re-added last so they still win over the local file.
+builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: false);
+builder.Configuration.AddEnvironmentVariables();
+
+
 string connectionString = builder.Configuration.GetConnectionString("AuctionDb")
     ?? throw new InvalidOperationException("ConnectionStrings:AuctionDb is not set in appsettings.json.");
 

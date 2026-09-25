@@ -35,11 +35,31 @@ public sealed class AuthServerConfig
     /// </summary>
     public string InternalSecret { get; set; } = string.Empty;
 
-    /// <summary>Failed logins allowed before the account is locked.</summary>
+    /// <summary>
+    /// Failed logins allowed from ONE address before that username is
+    /// locked for that address (LoginThrottle). The owner logging in from
+    /// elsewhere is unaffected.
+    /// </summary>
     public int MaxLoginAttempts { get; set; } = 5;
 
     /// <summary>How long a lockout lasts.</summary>
     public int LockoutMinutes { get; set; } = 15;
+
+    /// <summary>
+    /// Failed logins from ALL addresses together before the account itself
+    /// is locked everywhere. The backstop against one account being guessed
+    /// at from many machines; high enough that nobody can lock someone
+    /// else out casually.
+    /// </summary>
+    public int AccountLockAttempts { get; set; } = 50;
+
+    /// <summary>
+    /// Believe the X-Forwarded-For header for the client's address. ONLY
+    /// turn this on when Auth sits behind a reverse proxy (nginx, Caddy)
+    /// that sets it - otherwise any client can type a fake address into
+    /// the header and walk around every per-IP limit.
+    /// </summary>
+    public bool TrustForwardedFor { get; set; } = false;
 
     /// <summary>How long an issued session token stays valid, if unused.</summary>
     public int SessionLifetimeHours { get; set; } = 24;
@@ -70,6 +90,9 @@ public sealed class AuthServerConfig
 
         if (LockoutMinutes < 1)
             throw new InvalidOperationException("Auth:LockoutMinutes must be at least 1.");
+
+        if (AccountLockAttempts < MaxLoginAttempts)
+            throw new InvalidOperationException("Auth:AccountLockAttempts must be at least Auth:MaxLoginAttempts.");
 
         if (SessionLifetimeHours < 1)
             throw new InvalidOperationException("Auth:SessionLifetimeHours must be at least 1.");

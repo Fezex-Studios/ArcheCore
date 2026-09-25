@@ -1,0 +1,24 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <!--
+    Integration tests against a real MySQL/MariaDB and the real persistence
+    server. See Program.cs for how to run. A console app on purpose: no test
+    framework packages, and "exit code 0" is all CI needs.
+    -->
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>disable</Nullable>
+        <IsPackable>false</IsPackable>
+        <!-- World and Persistence both have a Program class. -->
+        <NoWarn>$(NoWarn);CS0436</NoWarn>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\ArcheCore.Server.World\ArcheCore.Server.World.csproj" />
+        <ProjectReference Include="..\ArcheCore.Server.Persistence\ArcheCore.Server.Persistence.csproj" />
+        <ProjectReference Include="..\ArcheCore.Network\ArcheCore.Network.csproj" />
+    </ItemGroup>
+
+</Project>

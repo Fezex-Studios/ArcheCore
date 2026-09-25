@@ -1,0 +1,2 @@
+# Real secrets and passwords - never commit. See appsettings.Local.example.json.
+appsettings.Local.json

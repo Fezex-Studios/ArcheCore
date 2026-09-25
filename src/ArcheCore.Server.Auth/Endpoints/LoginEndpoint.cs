@@ -8,8 +8,15 @@ using Microsoft.Extensions.Options;
 namespace ArcheCore.Server.Auth.Endpoints;
 
 /// <summary>
-/// Port of LoginRoute.ts. Same lockout behaviour, same messages, same
-/// one-session-per-account rule.
+/// Port of LoginRoute.ts, same one-session-per-account rule.
+///
+/// Lockout is two-level (audit gap 3):
+///   - per (username, address): MaxLoginAttempts failures lock that name
+///     for that address only (LoginThrottle, in memory). Typing someone
+///     else's name five times no longer locks THEM out.
+///   - per account: AccountLockAttempts failures from anywhere lock the
+///     account everywhere (failed_logins table) - the backstop against a
+///     distributed guess.
 /// </summary>
 public static class LoginEndpoint
 {
@@ -20,7 +27,9 @@ public static class LoginEndpoint
             AuthDbContext db,
             PasswordService passwords,
             IOptions<AuthServerConfig> configOptions,
-            ILoggerFactory loggerFactory) =>
+            ILoggerFactory loggerFactory,
+            LoginThrottle throttle,
+            HttpContext http) =>
         {
             var config = configOptions.Value;
             var log    = loggerFactory.CreateLogger("Login");
@@ -32,8 +41,14 @@ public static class LoginEndpoint
                 return Fail("Invalid username or password");
 
             var now = DateTime.UtcNow;
+            var ip  = ClientAddress.Of(http, config.TrustForwardedFor);
+            var lockout = TimeSpan.FromMinutes(config.LockoutMinutes);
 
-            // ── Lockout check ───────────────────────────────────────────
+            // ── Per-address lockout ─────────────────────────────────────
+            if (throttle.IsLocked(username, ip, now, out var ipRemaining))
+                return Fail($"Too many failed attempts. Try again in {ipRemaining} minute(s).");
+
+            // ── Account-wide lockout ────────────────────────────────────
             var failRow = await db.FailedLogins
                 .FirstOrDefaultAsync(f => f.Username == username);
 
@@ -84,16 +99,18 @@ public static class LoginEndpoint
                 // table with junk rows from a dictionary run.
                 if (account is not null)
                 {
+                    bool ipLocked = throttle.RecordFailure(username, ip, now, config.MaxLoginAttempts, lockout);
+
                     var attempts = (failRow?.Attempts ?? 0) + 1;
 
-                    if (attempts >= config.MaxLoginAttempts)
+                    if (attempts >= config.AccountLockAttempts)
                     {
                         var lockedUntil = now.AddMinutes(config.LockoutMinutes);
 
                         await UpsertFailure(db, failRow, username, attempts, lockedUntil);
 
                         log.LogWarning(
-                            "Account '{Username}' locked after {Attempts} failed attempts",
+                            "Account '{Username}' locked everywhere after {Attempts} failed attempts",
                             username, attempts);
 
                         return Fail(
@@ -101,6 +118,14 @@ public static class LoginEndpoint
                     }
 
                     await UpsertFailure(db, failRow, username, attempts, lockedUntil: null);
+
+                    if (ipLocked)
+                    {
+                        log.LogWarning("Login for '{Username}' locked for {Ip} after {Max} failed attempts",
+                            username, ip, config.MaxLoginAttempts);
+
+                        return Fail($"Too many failed attempts. Try again in {config.LockoutMinutes} minutes.");
+                    }
                 }
 
                 // Identical message whether or not the account exists.
@@ -108,6 +133,8 @@ public static class LoginEndpoint
             }
 
             // ── Success ─────────────────────────────────────────────────
+            throttle.Clear(username, ip);
+
             if (failRow is not null)
             {
                 db.FailedLogins.Remove(failRow);

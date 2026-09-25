@@ -7,6 +7,15 @@ using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// ── Secrets (audit gap 3) ────────────────────────────────────────────
+// Real secrets and passwords live in appsettings.Local.json next to this
+// file (git-ignored; copy appsettings.Local.example.json) or in environment
+// variables - never in appsettings.json, which is committed. Environment
+// variables are re-added last so they still win over the local file.
+builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: false);
+builder.Configuration.AddEnvironmentVariables();
+
+
 // ── Config ───────────────────────────────────────────────────────────
 // Replaces ServerConfig.ts + dotenv + the .env file. Same appsettings.json
 // shape as the World and Persistence servers, so the shared secret now
@@ -51,6 +60,7 @@ builder.Services.AddDbContext<AuthDbContext>(options =>
 // dummy hash once in its constructor; making it transient would pay that
 // ~250ms bcrypt cost on every single request that resolves it.
 builder.Services.AddSingleton<PasswordService>();
+builder.Services.AddSingleton<LoginThrottle>();
 builder.Services.AddSingleton<GameDataProvider>();
 builder.Services.AddHostedService<SessionPurgeService>();
 
@@ -96,7 +106,7 @@ builder.Services.AddRateLimiter(options =>
         }
 
         return RateLimitPartition.GetFixedWindowLimiter(
-            ClientKey(context),
+            ClientAddress.Of(context, config.TrustForwardedFor),
             _ => new FixedWindowRateLimiterOptions
             {
                 PermitLimit = 10,
@@ -106,7 +116,7 @@ builder.Services.AddRateLimiter(options =>
 
     options.AddPolicy("auth-strict", context =>
         RateLimitPartition.GetFixedWindowLimiter(
-            ClientKey(context),
+            ClientAddress.Of(context, config.TrustForwardedFor),
             _ => new FixedWindowRateLimiterOptions
             {
                 PermitLimit = 5,
@@ -143,16 +153,6 @@ app.Logger.LogInformation("Auth Server Ready");
 
 app.Run();
 
-// Partition key for the rate limiter. Prefers X-Forwarded-For so the limit
-// still works per-user once this sits behind a reverse proxy; falls back to
-// the socket address. Anonymous clients that present neither share one
-// bucket, which is the safe direction to fail.
-static string ClientKey(HttpContext context)
-{
-    var forwarded = context.Request.Headers["X-Forwarded-For"].ToString();
-
-    if (!string.IsNullOrWhiteSpace(forwarded))
-        return forwarded.Split(',')[0].Trim();
-
-    return context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-}
+// Client addresses: see ClientAddress. X-Forwarded-For used to be trusted
+// unconditionally here, which let any client dodge the rate limits by
+// sending a made-up header on every request.
