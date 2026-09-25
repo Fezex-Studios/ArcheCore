@@ -100,6 +100,13 @@ namespace ArcheCore.Server.World.Managers
         /// <summary>Network id of this player's summoned pet, or 0 (roadmap O).</summary>
         public int PetNetworkId;
 
+        /// <summary>
+        /// Zone the player is standing in (ZoneMap id, 0 = none). Kept current
+        /// by PlayerManager on every accepted move and teleport; changing it
+        /// fires PlayerEvent.OnEnterZone. Not persisted - recomputed on spawn.
+        /// </summary>
+        public ushort ZoneId;
+
         /// <summary>Where this player died - picks the nearest respawn point.</summary>
         public Vector3 DiedAt;
 

@@ -27,5 +27,12 @@ namespace ArcheCore.Network.Shared.Packets.W2C
         /// <summary>Your health on entering the world (full, for now - health isn't saved yet).</summary>
         public int Health;
         public int MaxHealth;
+
+        /// <summary>
+        /// The shard's world layout - name, tile size, interest radii. Null
+        /// from a server older than world partitioning; the client falls
+        /// back to its built-in defaults.
+        /// </summary>
+        public WorldSettingsData World;
     }
 }

@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Numerics;
 using ArcheCore.Server.World.Core.Entities;
+using ArcheCore.Server.World.Core.World;
 using ArcheCore.Network.Shared;
 using ArcheCore.Server.World.Networking.W2C;
 using LiteNetLib;
@@ -82,6 +83,23 @@ namespace ArcheCore.Server.World.Managers
         /// and one of the two has to be built first.
         /// </summary>
         private CombatManager _combat;
+
+        /// <summary>
+        /// The shard's terrain, for walking ON the ground. Null (or a
+        /// position with no heightmap under it) keeps the old behaviour:
+        /// the NPC moves in a straight 3D line toward its target.
+        /// </summary>
+        private WorldTerrainService _terrain;
+
+        /// <summary>
+        /// Largest height change accepted as "the ground here". Anything
+        /// bigger means the heightmap is describing something other than
+        /// what the NPC stands on - the valley under a bridge, the terrain
+        /// below a building's upper floor - and snapping to it would drop
+        /// the NPC through the structure. It keeps its current height
+        /// instead until real collision meshes exist server-side.
+        /// </summary>
+        private const float MaxGroundSnap = 4f;
 
         private readonly ConcurrentDictionary<int, NpcAiState> _active = new();
 
@@ -189,6 +207,29 @@ namespace ArcheCore.Server.World.Managers
         /// </summary>
         /// <summary>Called once at boot by WorldServer, after CombatManager exists.</summary>
         public void SetCombat(CombatManager combat) => _combat = combat;
+
+        /// <summary>Called once at boot by WorldServer when NpcGroundSnap is on.</summary>
+        public void SetTerrain(WorldTerrainService terrain) => _terrain = terrain;
+
+        /// <summary>
+        /// Ground distance, ignoring height. Arrival checks use this because
+        /// a terrain-following NPC's Y is decided by the ground, not by its
+        /// target - a waypoint rolled at spawn height on a slope would
+        /// otherwise sit forever "0.7 units away" straight up.
+        /// </summary>
+        private static float FlatDistance(Vector3 a, Vector3 b)
+        {
+            float dx = a.X - b.X, dz = a.Z - b.Z;
+            return MathF.Sqrt(dx * dx + dz * dz);
+        }
+
+        private bool TryGround(Vector3 near, out float groundY)
+        {
+            groundY = 0f;
+            return _terrain != null &&
+                   _terrain.TryGetGroundHeight(near.X, near.Z, out groundY) &&
+                   MathF.Abs(groundY - near.Y) <= MaxGroundSnap;
+        }
 
         /// <summary>
         /// Someone hit this NPC: it fights back, whatever its aggro radius.
@@ -452,7 +493,7 @@ namespace ArcheCore.Server.World.Managers
                 {
                     state.WanderTarget = state.SpawnOrigin;
 
-                    if (Vector3.Distance(state.CurrentPosition, state.SpawnOrigin) <= ArriveDistance)
+                    if (FlatDistance(state.CurrentPosition, state.SpawnOrigin) <= ArriveDistance)
                     {
                         state.Returning = false;
                         HealOnArrival(state.NetworkId);
@@ -462,7 +503,7 @@ namespace ArcheCore.Server.World.Managers
                 }
 
                 if (state.WanderTarget is { } existing &&
-                    Vector3.Distance(state.CurrentPosition, existing) >= ArriveDistance)
+                    FlatDistance(state.CurrentPosition, existing) >= ArriveDistance)
                 {
                     continue; // still travelling - leave it alone
                 }
@@ -629,7 +670,15 @@ namespace ArcheCore.Server.World.Managers
             if (state.WanderTarget is not { } target)
                 return;
 
+            // On terrain, walk across the ground and let the heightmap decide
+            // height; elsewhere (no heightmap, a bridge, an interior) keep the
+            // old straight-line move toward the target in 3D.
+            bool onTerrain = TryGround(state.CurrentPosition, out _);
+
             var toTarget = target - state.CurrentPosition;
+            if (onTerrain)
+                toTarget.Y = 0f;
+
             var distance = toTarget.Length();
             if (distance <= 0.01f)
                 return;
@@ -658,6 +707,10 @@ namespace ArcheCore.Server.World.Managers
             var direction = Vector3.Normalize(toTarget);
             var step = Math.Min(distance, speed * (float)delta.TotalSeconds);
             var newPos = state.CurrentPosition + direction * step;
+
+            if (onTerrain && TryGround(newPos, out float groundY))
+                newPos.Y = groundY;
+
             state.CurrentPosition = newPos;
 
             // Velocity for the client to extrapolate along through a

@@ -1,5 +1,6 @@
 using ArcheCore.Server.World.AuctionServer;
 using ArcheCore.Server.World.Core.Interaction;
+using ArcheCore.Server.World.Core.World;
 using ArcheCore.Library.Net.Worldserver;
 using ArcheCore.Network.Client;
 using ArcheCore.Network.Worldserver;
@@ -58,6 +59,8 @@ public class WorldServer : IHostedService, INetEventListener
     private Task _tickLoop;
     private PersistenceClient _persistenceClient;
     private DemoManager _demoManager;
+    private WorldTerrainService _terrain;
+    private ZoneService _zones;
 
     // Services
     private readonly DemoService _demoService;
@@ -124,11 +127,17 @@ public class WorldServer : IHostedService, INetEventListener
         // InterestManager is created here, not inside PlayerManager, because
         // SpawnManager needs the exact same instance - NPCs and players
         // share one grid (see SpawnManager.NpcIdBase).
+        // The shard's ground: every exported terrain heightmap, stitched.
+        // Before PlayerManager, because the movement validator is built
+        // inside it and needs the terrain to validate against.
+        _terrain = new WorldTerrainService(_world);
+        _zones = new ZoneService(_world);
+
         _replicationManager = new ReplicationManager();
         _interactions = new InteractionRegistry();
         _interestManager = new InterestManager();
         _spawnManager = new SpawnManager(_dbFactory, _interactions, _interestManager);
-        _playerManager = new PlayerManager(_spawnManager, _replicationManager, _world, _persistenceClient, _demoManager, _interestManager, _itemManager);
+        _playerManager = new PlayerManager(_spawnManager, _replicationManager, _world, _persistenceClient, _demoManager, _interestManager, _itemManager, _terrain, _zones);
         _playerManager.InitializeScripts();
 
         // Derive the snapshot LOD tiers from the interest radii. Must run
@@ -156,6 +165,8 @@ public class WorldServer : IHostedService, INetEventListener
         // Tick() once per tick, on the same thread as everything else that
         // touches InterestManager/SpatialGrid (neither is thread-safe).
         _npcAiManager = new NpcAiManager(_spawnManager, _interestManager, _replicationManager, _playerManager);
+        if (_world.NpcGroundSnap)
+            _npcAiManager.SetTerrain(_terrain);
 
         // 3. Load game data
         // Quests: definitions first, then the runtime links. Initialize is
@@ -225,8 +236,8 @@ public class WorldServer : IHostedService, INetEventListener
         _server.Start(_network.Port);
 
         Logger.Info(
-            "World started | {Host}:{Port} | TickRate={TickRate} | MaxPlayers={MaxPlayers}",
-            _network.Host, _network.Port, _world.TickRate, _world.MaxPlayers);
+            "World started | Shard={Shard} | {Host}:{Port} | TickRate={TickRate} | MaxPlayers={MaxPlayers}",
+            _world.ShardName, _network.Host, _network.Port, _world.TickRate, _world.MaxPlayers);
 
         // 6. Load NPC spawner definitions (all dormant until a player is near).
         _spawnManager.LoadSpawnerDefinitions();
@@ -283,6 +294,9 @@ public class WorldServer : IHostedService, INetEventListener
 
                     // Expired listings go home by mail, about once a minute.
                     _auctionManager.Tick();
+
+                    // Unloads heightmaps nobody has stood on for a while.
+                    _terrain.Tick();
 
                     // Spread-out periodic saves of dirty characters.
                     _playerManager.RunAutosave(tick);
@@ -367,6 +381,8 @@ public class WorldServer : IHostedService, INetEventListener
         services.Register(_auctionManager);
         services.Register(_cashShopManager);
         services.Register(_combatManager);
+        services.Register(_terrain);
+        services.Register(_zones);
 
         _packetDispatcher.AutoRegister(services.Resolve, typeof(WorldServer).Assembly);
     }

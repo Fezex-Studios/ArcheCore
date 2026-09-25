@@ -64,15 +64,16 @@ namespace ArcheCore.Server.World.Managers
         private readonly ReplicationManager _replication;
 
         /// <summary>
-        /// Real ground truth, when a heightmap has been loaded for this
-        /// zone. Null is a supported state - a zone with no exported
-        /// heightmap yet simply isn't terrain-validated, same as an
-        /// instance/dungeon interior (see HeightmapCollisionWorld's
-        /// remarks on out-of-bounds queries). Nothing else here changes
-        /// behaviour when it's null; the budget checks above are the
-        /// floor this class always had.
+        /// Real ground truth: the shard's stitched terrain
+        /// (WorldTerrainService.Collision). Null is a supported state - a
+        /// shard with no exported heightmaps simply isn't terrain-validated,
+        /// and positions with no heightmap under them (interiors, instances,
+        /// open sea) are never rejected by it (see HeightmapCollisionWorld's
+        /// remarks on missing data). Nothing else here changes behaviour
+        /// when it's null; the budget checks are the floor this class
+        /// always had.
         /// </summary>
-        private readonly HeightmapCollisionWorld _terrain;
+        private readonly ICollisionWorld _terrain;
         private readonly MovementProfile _terrainProfile;
 
         /// <summary>
@@ -95,14 +96,14 @@ namespace ArcheCore.Server.World.Managers
         }
 
         /// <param name="terrain">
-        /// Pass a loaded HeightmapCollisionWorld to additionally reject
+        /// Pass the shard's terrain collision world to additionally reject
         /// positions the server can prove are below the actual ground -
         /// the check the budget system was explicitly documented as NOT
         /// doing. Pass null (or use the other constructor) to keep the old
         /// budget-only behaviour, e.g. before any heightmap has been
         /// exported for a zone.
         /// </param>
-        public MovementValidator(ReplicationManager replication, HeightmapCollisionWorld terrain)
+        public MovementValidator(ReplicationManager replication, ICollisionWorld terrain)
         {
             _replication = replication;
             _terrain = terrain;

@@ -14,9 +14,9 @@ namespace ArcheCore.Movement.Terrain
     /// disagrees with the client's visual mesh produces constant small
     /// corrections on every slope.
     ///
-    /// ONE HEIGHTMAP PER ZONE/SCENE. A multi-terrain or instanced world
-    /// needs one of these per terrain tile, keyed by zone id - that
-    /// composition lives above this class, not in it.
+    /// ONE HEIGHTMAP PER UNITY TERRAIN. A partitioned world is many of
+    /// these, stitched together by TiledHeightField - that composition
+    /// lives above this class, not in it.
     ///
     /// WHAT THIS DOES NOT COVER, ON PURPOSE
     ///
@@ -29,7 +29,7 @@ namespace ArcheCore.Movement.Terrain
     /// that phase exists, not as something this format should stretch to
     /// fit.
     /// </summary>
-    public sealed class HeightmapData
+    public sealed class HeightmapData : IHeightField
     {
         private const uint Magic = 0x41434854; // "ACHT"
         private const uint FormatVersion = 1;
@@ -138,6 +138,33 @@ namespace ArcheCore.Movement.Terrain
             return normal.LengthSquared() > 1e-12f ? Vector3.Normalize(normal) : Vector3.UnitY;
         }
 
+        public bool TrySampleHeight(float worldX, float worldZ, out float height)
+        {
+            if (!IsInBounds(worldX, worldZ))
+            {
+                height = 0f;
+                return false;
+            }
+
+            height = SampleHeight(worldX, worldZ);
+            return true;
+        }
+
+        public bool TrySampleNormal(float worldX, float worldZ, out Vector3 normal)
+        {
+            if (!IsInBounds(worldX, worldZ))
+            {
+                normal = Vector3.UnitY;
+                return false;
+            }
+
+            normal = SampleNormal(worldX, worldZ);
+            return true;
+        }
+
+        /// <summary>Approximate managed memory held by the height samples.</summary>
+        public long SizeInBytes => (long)_heights.Length * sizeof(float);
+
         public bool IsInBounds(float worldX, float worldZ) =>
             worldX >= OriginX && worldX <= OriginX + SizeX &&
             worldZ >= OriginZ && worldZ <= OriginZ + SizeZ;
@@ -177,6 +204,47 @@ namespace ArcheCore.Movement.Terrain
             using var stream = File.OpenRead(path);
             using var reader = new BinaryReader(stream);
 
+            var h = ReadHeader(reader, path);
+
+            // One bulk read instead of a million ReadSingle calls - a 1025^2
+            // tile is 4MB, and the server loads tiles lazily ON THE TICK
+            // THREAD the first time a player walks onto one, so this path is
+            // worth keeping fast.
+            int count = h.ResolutionX * h.ResolutionZ;
+            var heights = new float[count];
+            byte[] raw = reader.ReadBytes(count * sizeof(float));
+
+            if (raw.Length != count * sizeof(float))
+                throw new InvalidDataException($"'{path}' is truncated: expected {count} height samples.");
+
+            if (BitConverter.IsLittleEndian)
+            {
+                Buffer.BlockCopy(raw, 0, heights, 0, raw.Length);
+            }
+            else
+            {
+                for (int i = 0; i < count; i++)
+                    heights[i] = BitConverter.ToSingle(raw, i * sizeof(float));
+            }
+
+            return new HeightmapData(h.OriginX, h.OriginZ, h.SizeX, h.SizeZ, h.ResolutionX, h.ResolutionZ, heights);
+        }
+
+        /// <summary>
+        /// Reads only the 32-byte header - where the heightmap sits and how
+        /// big it is - without touching the samples. This is what lets a
+        /// server index hundreds of tile heightmaps at boot in milliseconds
+        /// and load each one's samples only when a player first needs them.
+        /// </summary>
+        public static HeightmapHeader ReadHeader(string path)
+        {
+            using var stream = File.OpenRead(path);
+            using var reader = new BinaryReader(stream);
+            return ReadHeader(reader, path);
+        }
+
+        private static HeightmapHeader ReadHeader(BinaryReader reader, string path)
+        {
             uint magic = reader.ReadUInt32();
             if (magic != Magic)
                 throw new InvalidDataException($"'{path}' is not an ArcheCore heightmap (bad magic).");
@@ -185,18 +253,40 @@ namespace ArcheCore.Movement.Terrain
             if (version != FormatVersion)
                 throw new InvalidDataException($"'{path}' is heightmap format v{version}, expected v{FormatVersion}.");
 
-            float originX = reader.ReadSingle();
-            float originZ = reader.ReadSingle();
-            float sizeX = reader.ReadSingle();
-            float sizeZ = reader.ReadSingle();
-            int resolutionX = reader.ReadInt32();
-            int resolutionZ = reader.ReadInt32();
+            var header = new HeightmapHeader
+            {
+                OriginX     = reader.ReadSingle(),
+                OriginZ     = reader.ReadSingle(),
+                SizeX       = reader.ReadSingle(),
+                SizeZ       = reader.ReadSingle(),
+                ResolutionX = reader.ReadInt32(),
+                ResolutionZ = reader.ReadInt32()
+            };
 
-            var heights = new float[resolutionX * resolutionZ];
-            for (int i = 0; i < heights.Length; i++)
-                heights[i] = reader.ReadSingle();
+            if (header.ResolutionX < 2 || header.ResolutionZ < 2 || header.SizeX <= 0f || header.SizeZ <= 0f)
+                throw new InvalidDataException($"'{path}' has an invalid header.");
 
-            return new HeightmapData(originX, originZ, sizeX, sizeZ, resolutionX, resolutionZ, heights);
+            return header;
         }
+    }
+
+    /// <summary>Where a heightmap file sits in the world, read without its samples.</summary>
+    public struct HeightmapHeader
+    {
+        public float OriginX;
+        public float OriginZ;
+        public float SizeX;
+        public float SizeZ;
+        public int   ResolutionX;
+        public int   ResolutionZ;
+
+        public float MaxX => OriginX + SizeX;
+        public float MaxZ => OriginZ + SizeZ;
+
+        public bool Contains(float worldX, float worldZ) =>
+            worldX >= OriginX && worldX <= MaxX &&
+            worldZ >= OriginZ && worldZ <= MaxZ;
+
+        public long SampleBytes => (long)ResolutionX * ResolutionZ * sizeof(float);
     }
 }

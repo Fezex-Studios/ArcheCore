@@ -254,6 +254,24 @@ namespace ArcheCore.Server.World.Managers
                 return;
             }
 
+            // Zone rules, for attacker AND victim - same reasoning as safe
+            // zones above: a sanctuary can't be shot into from outside it.
+            var zones = _players.Zones;
+            if (zones != null)
+            {
+                if (!zones.AllowsPvpAt(attacker.Position, out var attackerZoneDef))
+                {
+                    W2CInteractDeniedPacketSender.Send(attackerPeer, $"You can't fight other players in {attackerZoneDef.DisplayName}.");
+                    return;
+                }
+
+                if (!zones.AllowsPvpAt(target.Position, out var targetZoneDef))
+                {
+                    W2CInteractDeniedPacketSender.Send(attackerPeer, $"They're protected in {targetZoneDef.DisplayName}.");
+                    return;
+                }
+            }
+
             if (Vector3.Distance(attacker.Position, target.Position) > skill.Range + RangeTolerance)
             {
                 W2CInteractDeniedPacketSender.Send(attackerPeer, "Too far away.");
@@ -379,10 +397,11 @@ namespace ArcheCore.Server.World.Managers
             Vector3 spawn = _spawnPoints.GetRespawnNear(session.DiedAt);
 
             session.Health = session.MaxHealth;
-            session.Position = spawn;
 
-            _players.NotifyAuthoritativeMove(session, spawn);
-            _players.SetPlayerTransform(playerId, spawn);
+            // A graveyard can be anywhere in the shard. TeleportPlayer moves
+            // them through the interest grid too, so the people and NPCs
+            // around the graveyard appear and the ones at the corpse go away.
+            _players.TeleportPlayer(peer, session, spawn);
 
             W2CRespawnPacketSender.Send(peer, spawn, session.Health, session.MaxHealth);
 
