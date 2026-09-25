@@ -101,6 +101,9 @@
         C2WCashShopBuy          = 80, // C2W: buy a cash shop item
         C2WCashShopGift         = 81, // C2W: buy a cash shop item as a gift for another character
 
+        // --- Character creation ---
+        W2CCreateCharacterFailed = 82, // W2C: name taken / not allowed - Reason; the create screen stays open
+
         // --- Mounts (roadmap N) ---
         W2CMountState           = 69, // W2C: someone mounted or dismounted - which mount, and how fast
         

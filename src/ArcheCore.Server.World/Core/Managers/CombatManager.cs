@@ -147,7 +147,7 @@ namespace ArcheCore.Server.World.Managers
             }
 
             // 3
-            long now = Environment.TickCount64;
+            long now = ArcheCore.Server.World.ServerClock.NowMs;
             if (session.SkillCooldowns.TryGetValue(skillId, out long readyAt) && now < readyAt)
                 return;
 

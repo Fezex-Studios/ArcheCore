@@ -1,3 +1,4 @@
+using ArcheCore.Network.Shared;
 using ArcheCore.Network.Shared.Packets.PersistenceServer;
 using ArcheCore.Network.Shared.Packets.PersistenceServer.P2W;
 using ArcheCore.Network.Shared.Packets.PersistenceServer.W2P;
@@ -95,12 +96,36 @@ app.MapPost("/characters/create", async (HttpContext context, PersistenceDbConte
         return;
     }
 
+    // H5: the same rules the world server and the client check, enforced
+    // here too - this is the last door before the database.
+    string name = request.Name?.Trim() ?? "";
+
+    P2WCreateCharacterResponse Refuse(string reason) => new()
+    {
+        Success = false, AccountId = request.AccountId, CharacterId = 0, Name = "", Reason = reason
+    };
+
+    if (!CharacterNameRules.IsValid(name, out var invalidReason))
+    {
+        await context.Response.WriteMsgPackAsync(Refuse(invalidReason));
+        return;
+    }
+
+    // Case-insensitive: the name column uses a _ci collation, so this
+    // finds "bebpu" when asked for "Bebpu". The unique index below is what
+    // actually guarantees it; this just gives the common case a nice answer.
+    if (await db.Characters.AsNoTracking().AnyAsync(c => c.Name == name))
+    {
+        await context.Response.WriteMsgPackAsync(Refuse("That name is taken."));
+        return;
+    }
+
     try
     {
         var character = new Character
         {
             AccountId = request.AccountId,
-            Name      = request.Name,
+            Name      = name,
             Level     = 1,
             PosX      = 0,
             PosY      = 2,
@@ -114,27 +139,27 @@ app.MapPost("/characters/create", async (HttpContext context, PersistenceDbConte
         db.Characters.Add(character);
         await db.SaveChangesAsync();
 
-        Console.WriteLine($"[Persistence] Created '{request.Name}' for AccountId={request.AccountId}");
+        Console.WriteLine($"[Persistence] Created '{name}' for AccountId={request.AccountId}");
 
         await context.Response.WriteMsgPackAsync(new P2WCreateCharacterResponse
         {
             Success     = true,
             AccountId   = request.AccountId,
             CharacterId = character.CharacterId,
-            Name        = request.Name
+            Name        = name,
+            Reason      = ""
         });
+    }
+    catch (DbUpdateException e) when (e.InnerException is MySqlConnector.MySqlException { ErrorCode: MySqlConnector.MySqlErrorCode.DuplicateKeyEntry })
+    {
+        // Two creates of the same name raced past the check above; the
+        // unique index let exactly one win.
+        await context.Response.WriteMsgPackAsync(Refuse("That name is taken."));
     }
     catch (Exception e)
     {
         Console.Error.WriteLine($"[Persistence] Create failed: {e}");
-
-        await context.Response.WriteMsgPackAsync(new P2WCreateCharacterResponse
-        {
-            Success     = false,
-            AccountId   = request.AccountId,
-            CharacterId = 0,
-            Name        = ""
-        });
+        await context.Response.WriteMsgPackAsync(Refuse("Character creation failed. Try again."));
     }
 });
 
@@ -242,6 +267,7 @@ app.MapPost("/characters/load", async (HttpContext context, PersistenceDbContext
         Y           = row.PosY,
         Z           = row.PosZ,
         Gold        = row.Gold,
+        SaveSeq     = row.SaveSeq,
         Inventory   = inventory,
         Quests      = quests
     });
@@ -288,6 +314,159 @@ app.MapPost("/characters/save", async (HttpContext context, PersistenceDbContext
         Console.Error.WriteLine($"[Persistence] Save failed for CharacterId={request.CharacterId}: {e}");
         context.Response.StatusCode = StatusCodes.Status500InternalServerError;
     }
+});
+
+// ── /characters/save-full ────────────────────────────────────────────
+//
+// THE character save. Level, position, gold, the whole inventory and the
+// whole quest log in ONE transaction, so a save either lands completely or
+// not at all - the old three separate requests could land half-applied,
+// and in any order.
+//
+// Ordering: the characters row is locked (SELECT ... FOR UPDATE) and the
+// save is only written if its SaveSeq is higher than the stored save_seq.
+// A save that arrives late, or twice (a retry after a lost answer), is
+// answered Stale and changes nothing. That is what lets the world server
+// retry a save whose answer it never got without ever writing old data
+// over new.
+//
+// ClaimMailId deletes one mail row in the same transaction: the mail goes
+// away exactly when the character holding its contents is saved.
+//
+// Answers:
+//   200 + Saved / Stale / NotFound / MailGone  - definite, nothing to retry
+//   200 + Invalid                               - definite, the request is wrong
+//   500                                         - rolled back, safe to retry
+app.MapPost("/characters/save-full", async (HttpContext context, PersistenceDbContext db) =>
+{
+    var request = await context.Request.ReadMsgPackAsync<W2PCharacterSaveFullRequest>();
+
+    if (request is null)
+    {
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        return;
+    }
+
+    // Validate before touching the database. A malformed save will never
+    // succeed, so it must be answered definitively rather than with a 500
+    // the world server would keep retrying.
+    string? invalid = ValidateFullSave(request);
+    if (invalid is not null)
+    {
+        Console.Error.WriteLine($"[Persistence] save-full REJECTED CharacterId={request.CharacterId}: {invalid}");
+        await context.Response.WriteMsgPackAsync(new P2WCharacterSaveFullResponse
+        {
+            Result = CharacterSaveResult.Invalid
+        });
+        return;
+    }
+
+    P2WCharacterSaveFullResponse answer;
+
+    try
+    {
+        await using var tx = await db.Database.BeginTransactionAsync();
+
+        var seqs = await db.Database.SqlQuery<long>($"""
+            SELECT save_seq AS Value
+              FROM characters
+             WHERE character_id = {request.CharacterId}
+               AND account_id   = {request.AccountId}
+             FOR UPDATE
+            """).ToListAsync();
+
+        if (seqs.Count == 0)
+        {
+            await tx.RollbackAsync();
+            answer = new P2WCharacterSaveFullResponse { Result = CharacterSaveResult.NotFound };
+        }
+        else if (seqs[0] >= request.SaveSeq)
+        {
+            await tx.RollbackAsync();
+            answer = new P2WCharacterSaveFullResponse { Result = CharacterSaveResult.Stale, CurrentSeq = seqs[0] };
+        }
+        else
+        {
+            bool mailGone = false;
+
+            if (request.ClaimMailId > 0)
+            {
+                var deleted = await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    DELETE FROM mail
+                     WHERE id           = {request.ClaimMailId}
+                       AND character_id = {request.CharacterId}
+                    """);
+
+                mailGone = deleted == 0;
+            }
+
+            if (mailGone)
+            {
+                await tx.RollbackAsync();
+                answer = new P2WCharacterSaveFullResponse { Result = CharacterSaveResult.MailGone, CurrentSeq = seqs[0] };
+            }
+            else
+            {
+                await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    UPDATE characters
+                       SET level    = {request.Level},
+                           pos_x    = {request.X},
+                           pos_y    = {request.Y},
+                           pos_z    = {request.Z},
+                           gold     = {request.Gold},
+                           save_seq = {request.SaveSeq}
+                     WHERE character_id = {request.CharacterId}
+                    """);
+
+                // The whole inventory, replaced. 20 rows at most, so a
+                // delete-and-insert is simpler than a diff and can't drift.
+                await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    DELETE FROM character_inventory WHERE character_id = {request.CharacterId}
+                    """);
+
+                foreach (var slot in request.Inventory!)
+                {
+                    await db.Database.ExecuteSqlInterpolatedAsync($"""
+                        INSERT INTO character_inventory (character_id, slot, item_template_id, quantity)
+                        VALUES ({request.CharacterId}, {slot.Slot}, {slot.ItemTemplateId}, {slot.Quantity})
+                        """);
+                }
+
+                if (request.Quests is not null)
+                {
+                    // Also replaced whole - which is what makes an abandoned
+                    // quest (no longer in the log) actually go away.
+                    await db.Database.ExecuteSqlInterpolatedAsync($"""
+                        DELETE FROM character_quests WHERE character_id = {request.CharacterId}
+                        """);
+
+                    foreach (var quest in request.Quests)
+                    {
+                        if (quest.Status == 0)
+                            continue;
+
+                        await db.Database.ExecuteSqlInterpolatedAsync($"""
+                            INSERT INTO character_quests (character_id, quest_id, status, progress)
+                            VALUES ({request.CharacterId}, {quest.QuestId}, {quest.Status}, {quest.Progress ?? string.Empty})
+                            """);
+                    }
+                }
+
+                await tx.CommitAsync();
+                answer = new P2WCharacterSaveFullResponse { Result = CharacterSaveResult.Saved, CurrentSeq = request.SaveSeq };
+            }
+        }
+    }
+    catch (Exception e)
+    {
+        // Nothing was committed (CommitAsync is the last thing in the try),
+        // so the world server may safely send the same request again.
+        Console.Error.WriteLine($"[Persistence] save-full failed for CharacterId={request.CharacterId}: {e.Message}");
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        return;
+    }
+
+    await context.Response.WriteMsgPackAsync(answer);
 });
 
 // ── /characters/inventory/save ───────────────────────────────────────
@@ -866,3 +1045,41 @@ app.MapPost("/mail/send", async (HttpContext context, PersistenceDbContext db) =
 });
 
 app.Run();
+
+// ── helpers ──────────────────────────────────────────────────────────
+
+static string? ValidateFullSave(W2PCharacterSaveFullRequest r)
+{
+    if (r.CharacterId <= 0) return "no CharacterId";
+    if (r.SaveSeq <= 0) return "SaveSeq must be positive";
+    if (r.Gold < 0) return $"negative gold {r.Gold}";
+    if (r.Level < 1) return $"level {r.Level}";
+    if (float.IsNaN(r.X) || float.IsNaN(r.Y) || float.IsNaN(r.Z) ||
+        float.IsInfinity(r.X) || float.IsInfinity(r.Y) || float.IsInfinity(r.Z))
+        return "position is not a number";
+    if (r.Inventory is null) return "Inventory is null (send an empty array for an empty bag)";
+    if (r.Inventory.Length > 256) return $"{r.Inventory.Length} inventory rows";
+
+    var slots = new HashSet<int>();
+    foreach (var s in r.Inventory)
+    {
+        if (s is null) return "null inventory row";
+        if (s.Slot < 0 || s.Slot > 255) return $"slot {s.Slot}";
+        if (s.ItemTemplateId <= 0 || s.Quantity <= 0) return $"slot {s.Slot} holds item {s.ItemTemplateId} x{s.Quantity}";
+        if (!slots.Add(s.Slot)) return $"slot {s.Slot} listed twice";
+    }
+
+    if (r.Quests is not null)
+    {
+        var ids = new HashSet<int>();
+        foreach (var q in r.Quests)
+        {
+            if (q is null) return "null quest row";
+            if (!ids.Add(q.QuestId)) return $"quest {q.QuestId} listed twice";
+            if ((q.Progress ?? "").Length > 128) return $"quest {q.QuestId} progress longer than 128";
+        }
+    }
+
+    return null;
+}
+

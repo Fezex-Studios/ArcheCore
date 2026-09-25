@@ -50,6 +50,8 @@ namespace ArcheCore.Server.World.Replication
         public const float MaxOffset = short.MaxValue / PositionScale; // ~511.98
 
         /// <summary>
+        /// SUPERSEDED (audit M8): velocity is now VelocityCodec's square-root
+        /// curve, up to VelocityCodec.MaxSpeed per axis. Kept for reference.
         /// Velocity fixed-point scale. 4 = 1/4 unit/sec precision in a
         /// signed byte, giving a representable range of +/-31.75 u/s.
         /// Walk is 5 u/s and a jump leaves the ground at ~7.7 u/s, so the
@@ -63,7 +65,7 @@ namespace ArcheCore.Server.World.Replication
         public const float VelocityScale = 4f;
 
         /// <summary>Max representable speed per axis, in units/second.</summary>
-        public const float MaxVelocity = sbyte.MaxValue / VelocityScale; // 31.75
+        public const float MaxVelocity = ArcheCore.Network.Shared.VelocityCodec.MaxSpeed;
 
         [Flags]
         public enum EntryFlags : byte
@@ -127,21 +129,12 @@ namespace ArcheCore.Server.World.Replication
         /// wrapped one pointing the opposite direction.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static sbyte QuantizeVelocity(float unitsPerSecond)
-        {
-            var scaled = unitsPerSecond * VelocityScale;
-
-            if (scaled > sbyte.MaxValue) return sbyte.MaxValue;
-            if (scaled < sbyte.MinValue) return sbyte.MinValue;
-
-            return (sbyte)scaled;
-        }
+        public static sbyte QuantizeVelocity(float unitsPerSecond) =>
+            ArcheCore.Network.Shared.VelocityCodec.Encode(unitsPerSecond);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static float DequantizeVelocity(sbyte quantized)
-        {
-            return quantized / VelocityScale;
-        }
+        public static float DequantizeVelocity(sbyte quantized) =>
+            ArcheCore.Network.Shared.VelocityCodec.Decode(quantized);
 
         /// <summary>
         /// Yaw in radians to a single byte. Wraps rather than clamps, since

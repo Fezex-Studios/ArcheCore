@@ -40,12 +40,12 @@ namespace ArcheCore.Server.World.Core.Services.Authservice
         public TimeSpan Window { get; init; } = TimeSpan.FromMinutes(1);
 
         private readonly Dictionary<int, Entry> _peers = new();
-        private DateTime _lastPrune = DateTime.UtcNow;
+        private TimeSpan _lastPrune = ServerClock.Elapsed;
 
         private struct Entry
         {
             public int      Attempts;
-            public DateTime WindowStart;
+            public TimeSpan WindowStart;
             public bool     InFlight;
         }
 
@@ -65,7 +65,7 @@ namespace ArcheCore.Server.World.Core.Services.Authservice
         {
             PruneIfDue();
 
-            var now = DateTime.UtcNow;
+            var now = ServerClock.Elapsed;
 
             if (!_peers.TryGetValue(peer.Id, out var entry))
                 entry = new Entry { WindowStart = now };
@@ -116,7 +116,7 @@ namespace ArcheCore.Server.World.Core.Services.Authservice
         /// </summary>
         private void PruneIfDue()
         {
-            var now = DateTime.UtcNow;
+            var now = ServerClock.Elapsed;
             if (now - _lastPrune < TimeSpan.FromMinutes(5))
                 return;
 

@@ -51,12 +51,29 @@ namespace ArcheCore.Server.World.Managers
     /// the dead zone absorbs. Widen the gap if you widen the threshold, or
     /// entities can slip through the band unnoticed.
     ///
+    /// ONLY PLAYERS OBSERVE (audit M1)
+    ///
+    /// NPCs, harvest nodes and corpses are OBSERVED, never observers. An
+    /// awareness pair is only ever recorded when at least one side is a
+    /// player: two mobs, or a mob and an ore node, never track each other.
+    /// That used to be O(n^2) per dense area (a camp of 30 mobs beside 50
+    /// nodes = 80 ids per mob, rebuilt as they wandered) for sets every
+    /// consumer then skipped with IsNpcId. A non-player's narrow phase now
+    /// queries a second, player-only grid, so its cost scales with the
+    /// players near it - usually zero.
+    ///
     /// NOT THREAD SAFE, BY DESIGN. One InterestManager belongs to one
     /// thread. NPC AI runs inside the main tick for this reason.
     /// </summary>
     public sealed class InterestManager
     {
         private readonly SpatialGrid _grid;
+
+        /// <summary>Players only - what a non-player's narrow phase searches.</summary>
+        private readonly SpatialGrid _playerGrid;
+
+        /// <summary>True for ids that observe (players). Everything else is only observed.</summary>
+        private readonly System.Func<int, bool> _isObserver;
 
         // ── Tuning ───────────────────────────────────────────────────────
 
@@ -111,9 +128,12 @@ namespace ArcheCore.Server.World.Managers
             float cellSize = 50f,
             float spawnRadius = 75f,
             float despawnRadius = 85f,
-            float recomputeThreshold = 5f)
+            float recomputeThreshold = 5f,
+            System.Func<int, bool> isObserver = null)
         {
             _grid = new SpatialGrid(cellSize);
+            _playerGrid = new SpatialGrid(cellSize);
+            _isObserver = isObserver ?? (id => !SpawnManager.IsNpcId(id));
 
             SpawnRadius        = spawnRadius;
             DespawnRadius      = despawnRadius;
@@ -132,7 +152,12 @@ namespace ArcheCore.Server.World.Managers
             _entered.Clear();
             _left.Clear();
 
+            bool observer = _isObserver(networkId);
+
             var crossedCell = _grid.Update(networkId, position);
+            if (observer)
+                _playerGrid.Update(networkId, position);
+
             var isKnown     = _known.ContainsKey(networkId);
 
             // Fast path. Still in the same cell AND hasn't drifted far
@@ -147,7 +172,10 @@ namespace ArcheCore.Server.World.Managers
             // ── Narrow phase ────────────────────────────────────────────
             // Everything genuinely within SpawnRadius. Note this is a
             // circle of world units, not a square of cells.
-            _grid.GetWithinRadius(position, SpawnRadius, _nearbyScratch, excludeId: networkId);
+            // A player sees everything; anything else only needs to know
+            // which PLAYERS can see it (see class doc, "only players observe").
+            (observer ? _grid : _playerGrid)
+                .GetWithinRadius(position, SpawnRadius, _nearbyScratch, excludeId: networkId);
 
             _nearbySet.Clear();
             for (int i = 0; i < _nearbyScratch.Count; i++)
@@ -215,6 +243,7 @@ namespace ArcheCore.Server.World.Managers
         public void Remove(int networkId)
         {
             _grid.Remove(networkId);
+            _playerGrid.Remove(networkId);
             _lastRecomputeAt.Remove(networkId);
 
             if (_known.TryGetValue(networkId, out var mine))

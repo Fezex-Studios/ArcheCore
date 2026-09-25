@@ -226,17 +226,22 @@ public class QuestManager
     {
         session.Quests.Clear();
         session.QuestsDirty = false;
+        session.UnknownQuestRows = null;
 
         if (stored == null)
             return;
+
+        List<QuestStateDto> unknown = null;
 
         foreach (var row in stored)
         {
             if (!_quests.TryGetValue(row.QuestId, out var definition))
             {
                 // The quest was deleted from the data since they played.
-                // Dropping it silently is right: there's nothing to show.
-                Logger.Debug("[Quests] Character has unknown quest {Id} - ignored", row.QuestId);
+                // Nothing to show - but saves replace the whole quest log,
+                // so the row is carried along untouched rather than erased.
+                Logger.Debug("[Quests] Character has unknown quest {Id} - kept, not shown", row.QuestId);
+                (unknown ??= new List<QuestStateDto>()).Add(row);
                 continue;
             }
 
@@ -247,13 +252,19 @@ public class QuestManager
                 Counts  = QuestProgress.ParseCounts(row.Progress, definition.Objectives.Length)
             };
         }
+
+        session.UnknownQuestRows = unknown?.ToArray();
     }
 
     /// <summary>Everything worth saving for this character (see CharacterPersistence).</summary>
     public QuestStateDto[] BuildSaveSet(PlayerSession session)
     {
-        var rows = new QuestStateDto[session.Quests.Count];
+        var unknown = session.UnknownQuestRows ?? Array.Empty<QuestStateDto>();
+        var rows = new QuestStateDto[session.Quests.Count + unknown.Length];
         int i = 0;
+
+        foreach (var row in unknown)
+            rows[i++] = row;
 
         foreach (var quest in session.Quests.Values)
         {

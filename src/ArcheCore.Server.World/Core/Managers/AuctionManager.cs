@@ -21,11 +21,21 @@ namespace ArcheCore.Server.World.Managers
     ///
     /// THE ORDER THAT MAKES IT SAFE
     ///
-    ///   List    take the item and the deposit HERE, then write the row
-    ///           there. If the row fails, the item is mailed straight back,
-    ///           so the worst case is a round trip, never a lost stack.
+    /// Nothing is done THERE until the character's database row agrees with
+    /// what was done HERE. Taking an item or gold only changes memory; a
+    /// crash before the next save would put it back, and if the listing or
+    /// the purchase already existed on the auction service by then, that
+    /// was a dupe. So every step below waits for a write-through save
+    /// (PlayerManager.SaveNowAsync) before it talks to the service.
     ///
-    ///   Buy     look at the listing (its price), CHARGE THE BUYER here, then
+    ///   List    take the item and the deposit HERE, SAVE, then write the
+    ///           row there. If the save isn't confirmed, both go back into
+    ///           the character. If the row fails, the item is mailed
+    ///           straight back, so the worst case is a round trip, never a
+    ///           lost stack.
+    ///
+    ///   Buy     look at the listing (its price), CHARGE THE BUYER here, SAVE,
+    ///           then
     ///           take the listing there under a fresh PURCHASE KEY. Taking it
     ///           also queues the seller's gold and the buyer's item as mail,
     ///           in the same transaction that removes the listing. If the
@@ -64,6 +74,13 @@ namespace ArcheCore.Server.World.Managers
               TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(10) };
 
         private static readonly TimeSpan ListingLifetime = TimeSpan.FromHours(24);
+
+        /// <summary>
+        /// How long to wait for a write-through save before calling the
+        /// action off. Not waiting for ever is fine: whatever that save
+        /// does eventually, the undo is saved after it.
+        /// </summary>
+        private static readonly TimeSpan SaveWait = TimeSpan.FromSeconds(8);
         private const int MaxPrice = 1_000_000;
 
         private readonly AuctionClient _auction;
@@ -155,13 +172,35 @@ namespace ArcheCore.Server.World.Managers
                 return;
             }
 
-            // Deposit after the item, so a failure between the two can only
-            // ever cost the deposit - never the stack.
             _players.TryAddGold(peer, -deposit);
 
-            _ = CreateOnServerAsync(peer, session.CharacterId, session.Name ?? "",
-                                    itemTemplateId, ItemName(itemTemplateId), count, price,
-                                    DateTime.UtcNow.Add(ListingLifetime).Ticks);
+            // Write-through: the listing may only exist once the database
+            // no longer has the item in this character's bag.
+            var saved = _players.SaveNowAsync(session);
+
+            _ = CreateAfterSaveAsync(peer, session, saved, itemTemplateId, count, price, deposit);
+        }
+
+        private async Task CreateAfterSaveAsync(NetPeer peer, PlayerSession session, Task<SaveOutcome> saved,
+                                                int itemTemplateId, int count, int price, int deposit)
+        {
+            if (!await IsSavedAsync(saved))
+            {
+                Logger.Warn($"[Auction] Listing by character {session.CharacterId} called off: the save didn't confirm in time.");
+
+                await OnTickThreadAsync(() =>
+                {
+                    GiveBack(peer, session, deposit, itemTemplateId, count, "Listing failed");
+                    return true;
+                });
+
+                Fail(peer, "That couldn't be listed right now - try again in a moment.");
+                return;
+            }
+
+            await CreateOnServerAsync(peer, session.CharacterId, session.Name ?? "",
+                                      itemTemplateId, ItemName(itemTemplateId), count, price,
+                                      DateTime.UtcNow.Add(ListingLifetime).Ticks);
         }
 
         private async Task CreateOnServerAsync(NetPeer peer, long sellerId, string sellerName,
@@ -230,21 +269,25 @@ namespace ArcheCore.Server.World.Managers
 
             // 2. Charge the buyer. Gold is tick-thread only, and checking and
             //    deducting happen in the same tick-thread action, so two
-            //    quick clicks can't both spend the same gold.
-            bool charged;
+            //    quick clicks can't both spend the same gold. The charge is
+            //    saved (write-through) in that same action.
+            Task<SaveOutcome> saved;
 
             try
             {
-                charged = await OnTickThreadAsync(() =>
+                saved = await OnTickThreadAsync<Task<SaveOutcome>>(() =>
                 {
                     if (session.Gold < listing.Price)
                     {
                         W2CMarketResultPacketSender.Send(peer, false,
                             $"That costs {listing.Price}g and you have {session.Gold}g.", refresh: 1);
-                        return false;
+                        return null;
                     }
 
-                    return _players.TryAddGold(peer, -listing.Price);
+                    if (!_players.TryAddGold(peer, -listing.Price))
+                        return null;
+
+                    return _players.SaveNowAsync(session);
                 });
             }
             catch (Exception ex)
@@ -254,8 +297,25 @@ namespace ArcheCore.Server.World.Managers
                 return;
             }
 
-            if (!charged)
+            if (saved == null)
                 return;
+
+            // The purchase is only asked for once the charge is in the
+            // database - otherwise a crash now would hand the buyer the item
+            // AND their gold back.
+            if (!await IsSavedAsync(saved))
+            {
+                Logger.Warn($"[Auction] Purchase by character {buyerId} called off: the charge didn't save in time.");
+
+                await OnTickThreadAsync(() =>
+                {
+                    GiveBack(peer, session, listing.Price, 0, 0, "Purchase refunded");
+                    return true;
+                });
+
+                Fail(peer, "That purchase couldn't be completed right now - you weren't charged.", refresh: 1);
+                return;
+            }
 
             // 3. Take the listing, under a key that makes asking again safe.
             string purchaseKey = Guid.NewGuid().ToString("N");
@@ -450,6 +510,35 @@ namespace ArcheCore.Server.World.Managers
                 Logger.Error($"[Auction] LOST GOODS: could not post {quantity}x item {itemTemplateId} " +
                              $"(+{gold}g) to character {characterId}: {ex.Message}");
             }
+        }
+
+        /// <summary>A write-through save confirmed within SaveWait?</summary>
+        private static async Task<bool> IsSavedAsync(Task<SaveOutcome> save)
+        {
+            var finished = await Task.WhenAny(save, Task.Delay(SaveWait));
+            return finished == save && save.Result == SaveOutcome.Saved;
+        }
+
+        /// <summary>
+        /// Undo a take whose save didn't confirm. Tick thread only. Straight
+        /// back into the character if they're still here (and it fits), by
+        /// mail otherwise - never dropped.
+        /// </summary>
+        private void GiveBack(NetPeer peer, PlayerSession session, int gold, int itemTemplateId, int quantity, string subject)
+        {
+            bool online = peer.Tag == session && session.NetworkId != null;
+
+            int mailGold = gold;
+            if (gold > 0 && online && _players.TryAddGold(peer, gold))
+                mailGold = 0;
+
+            int mailQuantity = quantity;
+            if (itemTemplateId != 0 && quantity > 0 && online && _players.TryAddItem(peer, itemTemplateId, quantity))
+                mailQuantity = 0;
+
+            if (mailGold > 0 || (itemTemplateId != 0 && mailQuantity > 0))
+                _ = PostMailAsync(session.CharacterId, subject, mailGold,
+                                  mailQuantity > 0 ? itemTemplateId : 0, mailQuantity);
         }
 
         /// <summary>Run something on the tick thread and wait for what it returns, without blocking that thread.</summary>

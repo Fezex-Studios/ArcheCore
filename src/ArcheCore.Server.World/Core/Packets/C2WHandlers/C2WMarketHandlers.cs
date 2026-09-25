@@ -2,6 +2,7 @@ using ArcheCore.Library.Net.Worldserver;
 using ArcheCore.Network.Shared;
 using ArcheCore.Network.Shared.Packets.C2W;
 using ArcheCore.Network.Shared.Packets.PersistenceServer;
+using ArcheCore.Network.Shared.Packets.W2C;
 using ArcheCore.Network.Worldserver;
 using ArcheCore.Server.World.Managers;
 using LiteNetLib;
@@ -12,6 +13,10 @@ namespace ArcheCore.Server.World.Networking.C2W;
 /// <summary>
 /// Claim mail from the mailbox.
 ///
+/// Auction and mail packets are only accepted at an auctioneer / mailbox
+/// NPC the player opened them through (MarketAccess, audit H4). The cash
+/// shop works anywhere.
+///
 /// Every handler here starts the work and returns: the services are an HTTP
 /// hop away and the tick thread never waits on them. The managers hop back
 /// onto the tick thread before touching gold or inventory.
@@ -21,18 +26,21 @@ public class C2WMailClaimHandler : IPacketHandler
 {
     private readonly MailManager _mail;
     private readonly PlayerManager _players;
+    private readonly MarketAccess _market;
 
-    public C2WMailClaimHandler(MailManager mail, PlayerManager players)
+    public C2WMailClaimHandler(MailManager mail, PlayerManager players, MarketAccess market)
     {
         _mail = mail;
         _players = players;
+        _market = market;
     }
 
     public void Handle(NetPeer peer, NetPacketReader reader)
     {
         var packet = MessagePackSerializer.Deserialize<C2WMailClaimPacket>(reader.GetRemainingBytes());
 
-        if (_players.TryGetSession(peer, out var session))
+        if (_players.TryGetSession(peer, out var session) &&
+            _market.Check(peer, session, InteractionActionType.Mailbox))
             _ = _mail.ClaimAsync(peer, session, packet.MailId);
     }
 }
@@ -42,18 +50,21 @@ public class C2WAuctionBrowseHandler : IPacketHandler
 {
     private readonly AuctionManager _auctions;
     private readonly PlayerManager _players;
+    private readonly MarketAccess _market;
 
-    public C2WAuctionBrowseHandler(AuctionManager auctions, PlayerManager players)
+    public C2WAuctionBrowseHandler(AuctionManager auctions, PlayerManager players, MarketAccess market)
     {
         _auctions = auctions;
         _players = players;
+        _market = market;
     }
 
     public void Handle(NetPeer peer, NetPacketReader reader)
     {
         var packet = MessagePackSerializer.Deserialize<C2WAuctionBrowsePacket>(reader.GetRemainingBytes());
 
-        if (_players.TryGetSession(peer, out var session))
+        if (_players.TryGetSession(peer, out var session) &&
+            _market.Check(peer, session, InteractionActionType.Auction))
             _ = _auctions.BrowseAsync(peer, session, packet.Search, packet.MineOnly);
     }
 }
@@ -63,11 +74,13 @@ public class C2WAuctionCreateHandler : IPacketHandler
 {
     private readonly AuctionManager _auctions;
     private readonly PlayerManager _players;
+    private readonly MarketAccess _market;
 
-    public C2WAuctionCreateHandler(AuctionManager auctions, PlayerManager players)
+    public C2WAuctionCreateHandler(AuctionManager auctions, PlayerManager players, MarketAccess market)
     {
         _auctions = auctions;
         _players = players;
+        _market = market;
     }
 
     public void Handle(NetPeer peer, NetPacketReader reader)
@@ -75,7 +88,8 @@ public class C2WAuctionCreateHandler : IPacketHandler
         var packet = MessagePackSerializer.Deserialize<C2WAuctionCreatePacket>(reader.GetRemainingBytes());
 
         // Taking the item happens on this thread; writing the row doesn't.
-        if (_players.TryGetSession(peer, out var session))
+        if (_players.TryGetSession(peer, out var session) &&
+            _market.Check(peer, session, InteractionActionType.Auction))
             _auctions.Create(peer, session, packet.Slot, packet.Quantity, packet.Price);
     }
 }
@@ -85,18 +99,21 @@ public class C2WAuctionBuyHandler : IPacketHandler
 {
     private readonly AuctionManager _auctions;
     private readonly PlayerManager _players;
+    private readonly MarketAccess _market;
 
-    public C2WAuctionBuyHandler(AuctionManager auctions, PlayerManager players)
+    public C2WAuctionBuyHandler(AuctionManager auctions, PlayerManager players, MarketAccess market)
     {
         _auctions = auctions;
         _players = players;
+        _market = market;
     }
 
     public void Handle(NetPeer peer, NetPacketReader reader)
     {
         var packet = MessagePackSerializer.Deserialize<C2WAuctionBuyPacket>(reader.GetRemainingBytes());
 
-        if (_players.TryGetSession(peer, out var session))
+        if (_players.TryGetSession(peer, out var session) &&
+            _market.Check(peer, session, InteractionActionType.Auction))
             _ = _auctions.BuyAsync(peer, session, packet.AuctionId);
     }
 }
@@ -106,18 +123,21 @@ public class C2WAuctionCancelHandler : IPacketHandler
 {
     private readonly AuctionManager _auctions;
     private readonly PlayerManager _players;
+    private readonly MarketAccess _market;
 
-    public C2WAuctionCancelHandler(AuctionManager auctions, PlayerManager players)
+    public C2WAuctionCancelHandler(AuctionManager auctions, PlayerManager players, MarketAccess market)
     {
         _auctions = auctions;
         _players = players;
+        _market = market;
     }
 
     public void Handle(NetPeer peer, NetPacketReader reader)
     {
         var packet = MessagePackSerializer.Deserialize<C2WAuctionCancelPacket>(reader.GetRemainingBytes());
 
-        if (_players.TryGetSession(peer, out var session))
+        if (_players.TryGetSession(peer, out var session) &&
+            _market.Check(peer, session, InteractionActionType.Auction))
             _ = _auctions.CancelAsync(peer, session, packet.AuctionId);
     }
 }

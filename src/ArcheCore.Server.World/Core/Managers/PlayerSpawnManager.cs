@@ -84,6 +84,8 @@ namespace ArcheCore.Server.World.Managers
                 return;
             }
 
+            // Normally already done by PlayerManager.PrepareLoginAsync BEFORE
+            // the load. This catches two logins racing each other past it.
             if (_sessions.TryGetAccountPeer(accountId, out var existingPeer) && existingPeer != peer)
             {
                 Logger.Info($"Duplicate login Account={accountId} - disconnecting previous connection");
@@ -91,6 +93,21 @@ namespace ArcheCore.Server.World.Managers
                 CleanupPeer(existingPeer, true);
                 existingPeer.Disconnect();
             }
+
+            // The load must be the latest data. If a save of this character
+            // is still running (the kick just above queued one), or one newer
+            // than the load has already landed, playing on from this load
+            // would resurrect whatever that save took away. Refuse; logging
+            // in again a moment later loads the right data.
+            if (!isNewCharacter &&
+                !_persistence.IsLoadCurrent(character.CharacterId, character.SaveSeq, out var staleWhy))
+            {
+                Logger.Warn($"[Spawn] Account={accountId} CharacterId={character.CharacterId}: refused - {staleWhy}.");
+                peer.Disconnect();
+                return;
+            }
+
+            _persistence.OnLoaded(character.CharacterId, character.SaveSeq);
 
             _sessions.RegisterAccountPeer(accountId, peer);
 
@@ -203,10 +220,10 @@ namespace ArcheCore.Server.World.Managers
 
             if (isNewCharacter)
             {
-                // New character - nothing to mark "already matches the
-                // database" yet (inventory is empty either way), so this
-                // just writes the real spawn point instead of waiting for
-                // the first autosave, same as before the inventory pass.
+                // New character - the row still holds the placeholder
+                // position, so write the real spawn point right away.
+                // Quests are loaded below; a new character has none, so
+                // this snapshot's empty quest log is correct.
                 _persistence.SaveInBackground(session);
             }
             else

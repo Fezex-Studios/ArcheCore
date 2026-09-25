@@ -6,6 +6,7 @@ using ArcheCore.Network.Shared.Packets.PersistenceServer.P2W;
 using ArcheCore.Network.Worldserver;
 using ArcheCore.Server.World.Core.Services;
 using ArcheCore.Server.World.Managers;
+using ArcheCore.Server.World.Networking.W2C;
 using LiteNetLib;
 using MessagePack;
 using NLog;
@@ -56,11 +57,12 @@ namespace ArcheCore.Server.World.Networking.C2W
 
             string name = request.Name?.Trim() ?? string.Empty;
 
-            if (name.Length < 2 || name.Length > 20)
+            // H5: letters/digits only, 3-16, not reserved. A bad name is a
+            // normal mistake, not an attack: say why and keep the connection.
+            if (!CharacterNameRules.IsValid(name, out var invalidReason))
             {
-                Logger.Warn(
-                    $"[CreateCharacter] Invalid name '{name}' — disconnecting");
-                peer.Disconnect();
+                Logger.Debug($"[CreateCharacter] AccountId={accountId}: name refused ({invalidReason})");
+                W2CCreateCharacterFailedPacketSender.Send(peer, invalidReason);
                 return;
             }
 
@@ -96,9 +98,15 @@ namespace ArcheCore.Server.World.Networking.C2W
 
             if (!response.Success)
             {
-                Logger.Warn(
-                    $"[CreateCharacter] Failed for AccountId={accountId}");
-                _playerManager.EnqueueAction(() => peer.Disconnect());
+                // Name taken (or refused) - let them pick another one.
+                string reason = string.IsNullOrEmpty(response.Reason) ? "Character creation failed." : response.Reason;
+                Logger.Info($"[CreateCharacter] Refused for AccountId={accountId}: {reason}");
+                _playerManager.EnqueueAction(() =>
+                {
+                    _playerManager.CancelSpawn(peer);
+                    if (peer.ConnectionState == ConnectionState.Connected)
+                        W2CCreateCharacterFailedPacketSender.Send(peer, reason);
+                });
                 return;
             }
 

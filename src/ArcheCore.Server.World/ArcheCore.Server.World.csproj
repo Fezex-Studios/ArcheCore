@@ -52,7 +52,6 @@
     </PropertyGroup>
     <ItemGroup>
       <Folder Include="Core\Lua\DeveloperSDK\" />
-      <Folder Include="Core\Network\" />
       <Folder Include="LuaSDK\" />
       <Folder Include="Lua\Scripting\" />
       <Folder Include="Physics\" />

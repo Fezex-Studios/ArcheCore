@@ -51,7 +51,11 @@ public class C2WChatHandler : IPacketHandler
                 .Deserialize<C2WChatMessagePacket>(
                     reader.GetRemainingBytes());
 
-            string message = request.Message?.Trim() ?? string.Empty;
+            // H5: no control characters or bidi overrides (U+202A-202E,
+            // U+2066-2069) - they reorder or hide text in everyone else's chat.
+            // Rich-text tags are made harmless on the client, which shows
+            // player text inside <noparse>.
+            string message = StripControl(request.Message)?.Trim() ?? string.Empty;
 
             if (message.Length == 0 || message.Length > 200)
             {
@@ -126,6 +130,22 @@ public class C2WChatHandler : IPacketHandler
                 senderName,
                 message,
                 ChatChannel.Whisper);
+        }
+
+        private static string StripControl(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return text;
+
+            var sb = new System.Text.StringBuilder(text.Length);
+            foreach (char c in text)
+            {
+                if (char.IsControl(c)) continue;
+                if (c >= '\u202A' && c <= '\u202E') continue;
+                if (c >= '\u2066' && c <= '\u2069') continue;
+                sb.Append(c);
+            }
+            return sb.ToString();
         }
     }
 }

@@ -32,16 +32,22 @@ namespace ArcheCore.PersistenceServer.Api.Data
 
                 entity.Property(c => c.CharacterId).HasColumnName("character_id");
                 entity.Property(c => c.AccountId).HasColumnName("account_id");
-                entity.Property(c => c.Name).HasColumnName("name").HasMaxLength(64);
+                // Case-insensitive collation + unique index: "Bebpu" and
+                // "bebpu" are the same name (audit H5). Whisper and gift
+                // resolve players by name, so two of one name was a bug.
+                entity.Property(c => c.Name).HasColumnName("name").HasMaxLength(64)
+                      .UseCollation("utf8mb4_unicode_ci");
                 entity.Property(c => c.Level).HasColumnName("level").HasDefaultValue(1);
                 entity.Property(c => c.PosX).HasColumnName("pos_x").HasDefaultValue(0f);
                 entity.Property(c => c.PosY).HasColumnName("pos_y").HasDefaultValue(2f);
                 entity.Property(c => c.PosZ).HasColumnName("pos_z").HasDefaultValue(0f);
 
                 entity.Property(c => c.Gold).HasColumnName("gold").HasDefaultValue(0);
+                entity.Property(c => c.SaveSeq).HasColumnName("save_seq").HasDefaultValue(0L);
                 entity.HasCheckConstraint("CK_characters_gold_nonnegative", "gold >= 0");
 
                 entity.HasIndex(c => c.AccountId);
+                entity.HasIndex(c => c.Name).IsUnique();
             });
 
             // Per-slot inventory rows. No FK navigation property on

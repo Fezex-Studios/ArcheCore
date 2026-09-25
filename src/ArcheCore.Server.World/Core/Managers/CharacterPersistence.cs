@@ -1,7 +1,12 @@
 using System;
-using System.Numerics;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using ArcheCore.Network.Shared.Packets.PersistenceServer;
+using ArcheCore.Network.Shared.Packets.PersistenceServer.P2W;
+using ArcheCore.Network.Shared.Packets.PersistenceServer.W2P;
 using NLog;
 using Worldserver.ArcheCore.PersistenceServer.Scripts;
 
@@ -10,264 +15,218 @@ namespace ArcheCore.Server.World.Managers
     /// <summary>
     /// The single call-site for "save this character".
     ///
-    /// Two different save shapes live here, and they are handled
-    /// differently on purpose:
+    /// Every save is a FULL SNAPSHOT - level, position, gold, every
+    /// inventory slot, the whole quest log - taken on the tick thread and
+    /// written by the persistence server in one transaction
+    /// (/characters/save-full). No diffs: a diff is only correct relative to
+    /// what the database holds, and "what the database holds" is exactly
+    /// what a lost or reordered request makes unknowable.
     ///
-    ///   - Gold/level/position are a full-value UPDATE - every save sends
-    ///     the character's CURRENT value, not a delta. That makes it safe
-    ///     to mark them saved optimistically, before the HTTP call even
-    ///     starts: if the call fails, HasBeenSaved is rolled back to
-    ///     false, IsDirty goes true again, and the NEXT autosave just
-    ///     resends whatever the current value is by then - which is
-    ///     always correct, because there was never a "diff" to lose.
+    /// Snapshots go through the character's CharacterSaveChain: one request
+    /// in flight at a time, strictly ordered by SaveSeq, retried with the
+    /// same SaveSeq until the database gives a definite answer. So a
+    /// snapshot, once taken, WILL land (or be definitely refused) - which is
+    /// why the session is marked saved at the moment of the snapshot. If a
+    /// save is definitely refused, the session is marked dirty again.
     ///
-    ///   - Inventory is a DIFF - only the slots that changed since the
-    ///     last CONFIRMED save are sent. That makes optimistic marking
-    ///     actively wrong: if SavedInventory were updated before the send
-    ///     is confirmed and the send then failed, the next autosave would
-    ///     compare Inventory to a SavedInventory that already (falsely)
-    ///     matches it, compute an EMPTY diff, and the lost write would
-    ///     never be retried. So SavedInventory/InventoryDirty are only
-    ///     touched after the persistence server confirms the write - see
-    ///     SaveAndReportAsync below.
-    ///
-    /// SaveInBackground is what gameplay code uses: fire the save without
-    /// blocking the tick thread. SaveAsync is for shutdown, where the
-    /// caller needs to wait.
+    /// Three ways in, all tick-thread only:
+    ///   SaveInBackground   autosave, level-up, disconnect. Fire and forget.
+    ///   SaveNowAsync       write-through: the caller waits for the database
+    ///                      before doing something irreversible elsewhere
+    ///                      (listing on the auction house, paying for one).
+    ///   SaveClaimingMailAsync  the snapshot includes a mail's contents and
+    ///                      deletes that mail in the same transaction.
     /// </summary>
     public class CharacterPersistence
     {
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
-        private readonly PersistenceClient _persistence;
+        private readonly Func<W2PCharacterSaveFullRequest, Task<P2WCharacterSaveFullResponse>> _send;
         private readonly Action<Action> _enqueueOnTickThread;
+        private readonly ConcurrentDictionary<long, CharacterSaveChain> _chains = new();
 
         public CharacterPersistence(PersistenceClient persistence, Action<Action> enqueueOnTickThread)
+            : this(request => persistence.W2PCharacterSaveFull.Send(request), enqueueOnTickThread)
         {
-            _persistence = persistence;
+        }
+
+        /// <summary>For tests: any send function.</summary>
+        public CharacterPersistence(
+            Func<W2PCharacterSaveFullRequest, Task<P2WCharacterSaveFullResponse>> send,
+            Action<Action> enqueueOnTickThread)
+        {
+            _send = send;
             _enqueueOnTickThread = enqueueOnTickThread;
         }
 
+        /// <summary>The chain for a character, created on first use. Never removed.</summary>
+        public CharacterSaveChain ChainFor(long characterId) =>
+            _chains.GetOrAdd(characterId, id => new CharacterSaveChain(id, _send));
+
+        // ── Taking a snapshot ────────────────────────────────────────
+
         /// <summary>
-        /// Compares Inventory to SavedInventory and returns only the
-        /// slots that differ. ItemTemplateId/Quantity 0 in the result
-        /// means "this slot is now empty" - the persistence server
-        /// deletes that row rather than storing a zeroed one.
+        /// Everything the database should hold for this character, right
+        /// now. Tick thread only. Marks the session saved (see class doc).
         /// </summary>
-        public static InventorySlotDto[] ComputeInventoryDiff(PlayerSession session)
+        public static W2PCharacterSaveFullRequest Capture(PlayerSession session, long claimMailId = 0)
         {
-            var diffs = new System.Collections.Generic.List<InventorySlotDto>();
+            var inventory = new List<InventorySlotDto>(InventoryConstants.SlotCount);
 
-            for (int i = 0; i < InventoryConstants.SlotCount; i++)
+            for (int i = 0; i < session.Inventory.Length; i++)
             {
-                var cur   = session.Inventory[i];
-                var saved = session.SavedInventory[i];
-
-                if (cur.ItemTemplateId != saved.ItemTemplateId || cur.Quantity != saved.Quantity)
-                {
-                    diffs.Add(new InventorySlotDto
-                    {
-                        Slot           = i,
-                        ItemTemplateId = cur.ItemTemplateId,
-                        Quantity       = cur.Quantity
-                    });
-                }
+                var slot = session.Inventory[i];
+                if (slot.ItemTemplateId > 0 && slot.Quantity > 0)
+                    inventory.Add(new InventorySlotDto { Slot = i, ItemTemplateId = slot.ItemTemplateId, Quantity = slot.Quantity });
             }
 
-            return diffs.ToArray();
+            // No QuestManager (a test, or quests disabled) = leave the
+            // quest rows alone rather than wipe them.
+            QuestStateDto[] quests = QuestManager.Current?.BuildSaveSet(session);
+
+            var request = new W2PCharacterSaveFullRequest
+            {
+                AccountId   = session.AccountId,
+                CharacterId = session.CharacterId,
+                Level       = session.Level,
+                X           = session.Position.X,
+                Y           = session.Position.Y,
+                Z           = session.Position.Z,
+                Gold        = session.Gold,
+                Inventory   = inventory.ToArray(),
+                Quests      = quests,
+                ClaimMailId = claimMailId
+            };
+
+            session.MarkSaved();
+            if (quests != null)
+                session.QuestsDirty = false;
+
+            return request;
         }
 
-        /// <summary>Tick thread only.</summary>
+        // ── Saving ───────────────────────────────────────────────────
+
+        /// <summary>Tick thread only. Fire and forget.</summary>
         public void SaveInBackground(PlayerSession session)
         {
-            long characterId = session.CharacterId;
-            int accountId    = session.AccountId;
-            string name      = session.Name;
-            int level        = session.Level;
-            var pos          = session.Position;
-            int gold         = session.Gold;
-
-            // Gold/level/position: safe to mark saved now (see class doc).
-            session.HasBeenSaved  = true;
-            session.SavedPosition = pos;
-            session.SavedLevel    = level;
-            session.SavedGold     = gold;
-
-            // Inventory: snapshot the diff and the target state, but do
-            // NOT touch SavedInventory/InventoryDirty yet - that happens
-            // only once SaveAndReportAsync hears the write was confirmed.
-            // Snapshotting Inventory here (not re-reading it later) also
-            // means a TryAddItem/TryMoveItem that happens WHILE this send
-            // is in flight is naturally excluded from this diff and will
-            // show up correctly in the NEXT one instead of racing it.
-            InventorySlotDto[] inventoryDiff = Array.Empty<InventorySlotDto>();
-            InventorySlot[] targetInventory = null;
-
-            if (session.InventoryDirty)
-            {
-                inventoryDiff = ComputeInventoryDiff(session);
-                targetInventory = (InventorySlot[])session.Inventory.Clone();
-            }
-
-            // Quests ride the same pass. They're sent whole rather than as a
-            // diff: a character has a handful of quest rows, so working out
-            // which changed would cost more than sending them.
-            QuestStateDto[] quests = null;
-
-            var questManager = QuestManager.Current;
-
-            if (session.QuestsDirty && questManager != null)
-            {
-                quests = questManager.BuildSaveSet(session);
-                session.QuestsDirty = false;   // set again below if the save fails
-            }
-
-            _ = SaveAndReportAsync(
-                session, characterId, accountId, name, level, pos, gold,
-                inventoryDiff, targetInventory);
-
-            if (quests is { Length: > 0 })
-                _ = SaveQuestsAndReportAsync(session, characterId, accountId, quests);
-        }
-
-        private async Task SaveAndReportAsync(
-            PlayerSession session, long characterId, int accountId, string name,
-            int level, Vector3 pos, int gold,
-            InventorySlotDto[] inventoryDiff, InventorySlot[] targetInventory)
-        {
-            var (baseOk, inventoryOk) =
-                await SaveAsync(characterId, accountId, name, level, pos, gold, inventoryDiff);
-
-            // Back on the tick thread - these fields are tick-thread-only.
-            _enqueueOnTickThread(() =>
-            {
-                if (!baseOk)
-                {
-                    // Force the next autosave to resend gold/level/position
-                    // with whatever the CURRENT values are by then.
-                    session.HasBeenSaved = false;
-                }
-
-                if (targetInventory != null)
-                {
-                    if (inventoryOk)
-                    {
-                        // Confirmed - SavedInventory can now advance to the
-                        // state we sent. Not to session.Inventory's CURRENT
-                        // value, which may have moved on since we started.
-                        session.SavedInventory = targetInventory;
-                        // Only clear the flag if nothing has changed the
-                        // live inventory since we snapshotted it - if it
-                        // has, InventoryDirty must stay true so the newer
-                        // change still gets picked up next time.
-                        session.InventoryDirty = !InventoryEquals(session.Inventory, targetInventory);
-                    }
-                    else
-                    {
-                        // Not confirmed - leave SavedInventory untouched
-                        // and make sure the flag is still set, so the next
-                        // autosave recomputes and resends a diff against
-                        // the (still-stale) SavedInventory.
-                        session.InventoryDirty = true;
-                    }
-                }
-            });
-        }
-
-        private async Task SaveQuestsAndReportAsync(
-            PlayerSession session, long characterId, int accountId, QuestStateDto[] quests)
-        {
-            bool ok = false;
-
-            try
-            {
-                ok = await _persistence.W2PQuestSave.Send(characterId, accountId, quests);
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[CharacterPersistence] Quest save threw for character {characterId}: {ex.Message}");
-            }
-
-            if (ok)
+            if (session.CharacterId <= 0)
                 return;
 
-            // Not confirmed: mark it dirty again so the next autosave retries
-            // with whatever the state is by then.
-            _enqueueOnTickThread(() => session.QuestsDirty = true);
+            _ = SaveAndReportAsync(session, Capture(session), coalescable: true);
         }
 
-        private static bool InventoryEquals(InventorySlot[] a, InventorySlot[] b)
+        /// <summary>
+        /// Tick thread only. Snapshot now and complete once the database has
+        /// it: true = saved. Waits as long as it takes (the chain never
+        /// guesses) - callers that can't wait put their own timeout on it,
+        /// and must treat a timeout as "not known to be saved".
+        /// </summary>
+        public Task<SaveOutcome> SaveNowAsync(PlayerSession session)
         {
-            for (int i = 0; i < InventoryConstants.SlotCount; i++)
-                if (a[i].ItemTemplateId != b[i].ItemTemplateId || a[i].Quantity != b[i].Quantity)
-                    return false;
+            if (session.CharacterId <= 0)
+                return Task.FromResult(SaveOutcome.Failed);
+
+            return SaveAndReportAsync(session, Capture(session), coalescable: true);
+        }
+
+        /// <summary>
+        /// Tick thread only. The session must ALREADY hold the mail's
+        /// contents. Saves it and deletes the mail in one transaction.
+        /// MailGone = nothing was written; the caller takes the contents
+        /// back out of the session.
+        /// </summary>
+        public Task<SaveOutcome> SaveClaimingMailAsync(PlayerSession session, long mailId)
+        {
+            if (session.CharacterId <= 0 || mailId <= 0)
+                return Task.FromResult(SaveOutcome.Failed);
+
+            return SaveAndReportAsync(session, Capture(session, mailId), coalescable: false);
+        }
+
+        private async Task<SaveOutcome> SaveAndReportAsync(
+            PlayerSession session, W2PCharacterSaveFullRequest request, bool coalescable)
+        {
+            var outcome = await ChainFor(request.CharacterId).Enqueue(request, coalescable);
+
+            if (outcome == SaveOutcome.Saved)
+            {
+                Logger.Debug($"[Save] CharacterId={request.CharacterId} saved (seq {request.SaveSeq}).");
+            }
+            else
+            {
+                // Not written. Make sure the next autosave sends everything
+                // again, with whatever the state is by then.
+                _enqueueOnTickThread(() => session.HasBeenSaved = false);
+            }
+
+            return outcome;
+        }
+
+        // ── Login ────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Any thread. Completes true once every save queued for this
+        /// character has a definite answer - the point after which loading
+        /// it returns the latest data. False on timeout.
+        /// </summary>
+        public Task<bool> WhenSettledAsync(long characterId, TimeSpan timeout) =>
+            _chains.TryGetValue(characterId, out var chain)
+                ? chain.WhenSettledAsync(timeout)
+                : Task.FromResult(true);
+
+        /// <summary>See CharacterSaveChain.IsLoadCurrent.</summary>
+        public bool IsLoadCurrent(long characterId, long loadedSeq, out string why)
+        {
+            if (_chains.TryGetValue(characterId, out var chain))
+                return chain.IsLoadCurrent(loadedSeq, out why);
+
+            why = null;
             return true;
         }
 
+        /// <summary>A character was loaded into the world; its saves continue from this seq.</summary>
+        public void OnLoaded(long characterId, long loadedSeq) =>
+            ChainFor(characterId).SeedFromLoad(loadedSeq);
+
+        // ── Shutdown ─────────────────────────────────────────────────
+
         /// <summary>
-        /// Safe from any thread. Never throws. Sends the base character
-        /// save and (if there's a non-empty diff) the inventory save in
-        /// parallel, and reports each outcome separately - a persistence
-        /// server that's up for one route and briefly failing on another
-        /// is a real scenario this needs to report correctly, not collapse
-        /// into a single bool.
+        /// Shutdown only, after the tick loop has stopped (so reading
+        /// sessions here is safe). Queues a final save for every dirty
+        /// session and waits for EVERY chain - including disconnect saves
+        /// still running for players who already left.
         /// </summary>
-        public async Task<(bool baseOk, bool inventoryOk)> SaveAsync(
-            long characterId, int accountId, string name, int level,
-            Vector3 pos, int gold, InventorySlotDto[] inventoryDiff)
+        public async Task<bool> SaveAllAndWaitAsync(IEnumerable<PlayerSession> sessions, TimeSpan timeout)
         {
-            var baseTask = SaveBaseAsync(characterId, accountId, name, level, pos, gold);
+            int queued = 0;
 
-            Task<bool> inventoryTask = (inventoryDiff != null && inventoryDiff.Length > 0)
-                ? SaveInventoryAsync(characterId, accountId, inventoryDiff)
-                : Task.FromResult(true); // nothing to save = trivially ok
-
-            await Task.WhenAll(baseTask, inventoryTask);
-
-            return (baseTask.Result, inventoryTask.Result);
-        }
-
-        private async Task<bool> SaveBaseAsync(
-            long characterId, int accountId, string name, int level, Vector3 pos, int gold)
-        {
-            try
+            foreach (var session in sessions)
             {
-                bool ok = await _persistence.W2PCharacterSave.Send(
-                    characterId, accountId, name, level, pos.X, pos.Y, pos.Z, gold);
+                if (!session.IsDirty || session.CharacterId <= 0)
+                    continue;
 
-                if (ok)
-                    Logger.Debug($"[Save] CharacterId={characterId} saved.");
-                else
-                    Logger.Error($"[Save] FAILED CharacterId={characterId} - persistence server returned an error.");
-
-                return ok;
+                _ = ChainFor(session.CharacterId).Enqueue(Capture(session), coalescable: true);
+                queued++;
             }
-            catch (Exception ex)
-            {
-                Logger.Error(ex, $"[Save] FAILED CharacterId={characterId} - persistence server unreachable.");
-                return false;
-            }
-        }
 
-        private async Task<bool> SaveInventoryAsync(
-            long characterId, int accountId, InventorySlotDto[] changes)
-        {
-            try
-            {
-                bool ok = await _persistence.W2PInventorySave.Send(characterId, accountId, changes);
+            var busy = _chains.Values.Where(c => c.IsBusy).ToList();
 
-                if (ok)
-                    Logger.Debug($"[Save] CharacterId={characterId} inventory: {changes.Length} slot(s) saved.");
-                else
-                    Logger.Error($"[Save] FAILED CharacterId={characterId} inventory - persistence server returned an error.");
+            if (busy.Count == 0)
+                return true;
 
-                return ok;
-            }
-            catch (Exception ex)
-            {
-                Logger.Error(ex, $"[Save] FAILED CharacterId={characterId} inventory - persistence server unreachable.");
-                return false;
-            }
+            Logger.Info($"[Shutdown] Saving {queued} character(s); waiting on {busy.Count} save queue(s)...");
+
+            var results = await Task.WhenAll(busy.Select(c => c.WhenSettledAsync(timeout)));
+            int unfinished = results.Count(r => !r);
+
+            if (unfinished == 0)
+                Logger.Info("[Shutdown] All characters saved.");
+            else
+                Logger.Error($"[Shutdown] {unfinished} character save queue(s) did not finish within " +
+                             $"{timeout.TotalSeconds:F0}s. Those characters lose what happened since their last confirmed save.");
+
+            return unfinished == 0;
         }
     }
 }

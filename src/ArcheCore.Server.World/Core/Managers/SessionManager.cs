@@ -131,6 +131,16 @@ namespace ArcheCore.Server.World.Managers
             return false;
         }
 
+        /// <summary>
+        /// Undo TryBeginSpawn after a create that was refused (name taken),
+        /// so the player can try another name on the same connection.
+        /// </summary>
+        public void CancelSpawn(NetPeer peer)
+        {
+            if (peer.Tag is PlayerSession { NetworkId: null } session)
+                session.SpawnRequested = false;
+        }
+
         public int GetLevel(NetPeer peer) =>
             peer.Tag is PlayerSession session ? session.Level : -1;
 

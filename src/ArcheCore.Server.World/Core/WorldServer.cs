@@ -31,6 +31,7 @@ public class WorldServer : IHostedService, INetEventListener
     private readonly NetworkConfig _network;
     private readonly IServiceScopeFactory _scopeFactory;
     private PacketDispatcher _packetDispatcher;
+    private readonly ArcheCore.Server.World.Networking.PacketRateLimiter _rateLimiter = new();
     private readonly GameDataPatchRunner _dataPatchRunner;
     private readonly IDbContextFactory<WorldDataDbContext> _dbFactory;
 
@@ -54,6 +55,7 @@ public class WorldServer : IHostedService, INetEventListener
     private MailManager _mailManager;
     private AuctionManager _auctionManager;
     private CashShopManager _cashShopManager;
+    private MarketAccess _marketAccess;
     private CombatManager _combatManager;
     private CancellationTokenSource _tickCts;
     private Task _tickLoop;
@@ -222,6 +224,7 @@ public class WorldServer : IHostedService, INetEventListener
         _auctionManager = new AuctionManager(
             _auctionClient, _persistenceClient, _playerManager, _itemManager, _playerManager.EnqueueAction);
         _cashShopManager = new CashShopManager(_persistenceClient, _playerManager.EnqueueAction);
+        _marketAccess = new MarketAccess(_interactions, _interactionActions);
 
         // The AI needs combat to hit players, combat needs the AI to kill
         // NPCs - one has to be built first, so the link is made here.
@@ -232,7 +235,9 @@ public class WorldServer : IHostedService, INetEventListener
         RegisterPackets();
 
         // 5. Start network
-        _server = new NetManager(this);
+        // Separate reliable channels for world, bulk UI and chat (audit M4).
+        // The client must use the same ChannelsCount.
+        _server = new NetManager(this) { ChannelsCount = ArcheCore.Network.Shared.PacketChannels.Count };
         _server.Start(_network.Port);
 
         Logger.Info(
@@ -380,6 +385,7 @@ public class WorldServer : IHostedService, INetEventListener
         services.Register(_mailManager);
         services.Register(_auctionManager);
         services.Register(_cashShopManager);
+        services.Register(_marketAccess);
         services.Register(_combatManager);
         services.Register(_terrain);
         services.Register(_zones);
@@ -395,6 +401,7 @@ public class WorldServer : IHostedService, INetEventListener
     public void OnPeerDisconnected(NetPeer peer, DisconnectInfo info)
     {
         _playerManager.HandlePlayerDisconnected(peer);
+        _rateLimiter.Forget(peer.Id);
     }
 
     public void OnConnectionRequest(ConnectionRequest request)
@@ -428,6 +435,18 @@ public class WorldServer : IHostedService, INetEventListener
             }
 
             packet = (Opcodes)reader.GetUShort();
+
+            // H3: a token bucket per (peer, opcode). Over the limit = the
+            // handler never runs; sustained flooding = disconnect.
+            switch (_rateLimiter.Check(peer.Id, packet, peer.Address?.ToString()))
+            {
+                case ArcheCore.Server.World.Networking.PacketRateLimiter.Verdict.Drop:
+                    return;
+                case ArcheCore.Server.World.Networking.PacketRateLimiter.Verdict.Disconnect:
+                    peer.Disconnect();
+                    return;
+            }
+
             _packetDispatcher.Handle(packet, peer, reader);
         }
         catch (MessagePackSerializationException ex)
