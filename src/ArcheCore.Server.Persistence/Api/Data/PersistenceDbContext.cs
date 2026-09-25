@@ -12,6 +12,17 @@ namespace ArcheCore.PersistenceServer.Api.Data
         public DbSet<CharacterInventoryItem> InventoryItems => Set<CharacterInventoryItem>();
         public DbSet<CharacterQuest> CharacterQuests => Set<CharacterQuest>();
 
+        // Cash shop (roadmap P): its catalogue and its currency. A purchase
+        // charges the account and posts the goods to the mailbox below in one
+        // transaction, because both are in this database.
+        public DbSet<CashShopItem> CashShopItems => Set<CashShopItem>();
+        public DbSet<AccountCredits> AccountCredits => Set<AccountCredits>();
+
+        // The general mailbox, shared by the auction house, the cash shop and
+        // admin gifts. See Mail and MailReceipt.
+        public DbSet<Mail> Mail => Set<Mail>();
+        public DbSet<MailReceipt> MailReceipts => Set<MailReceipt>();
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<Character>(entity =>
@@ -42,6 +53,58 @@ namespace ArcheCore.PersistenceServer.Api.Data
             // Quest state, same shape and same reasoning as inventory rows:
             // no navigation property, explicit queries only, composite key so
             // saving is an upsert.
+            modelBuilder.Entity<CashShopItem>(entity =>
+            {
+                entity.ToTable("cash_shop_items");
+                entity.HasKey(i => i.Id);
+
+                entity.Property(i => i.Id).HasColumnName("id");
+                entity.Property(i => i.DisplayName).HasColumnName("display_name").HasMaxLength(128).IsRequired();
+                entity.Property(i => i.Category).HasColumnName("category").HasMaxLength(64).IsRequired();
+                entity.Property(i => i.ItemTemplateId).HasColumnName("item_template_id");
+                entity.Property(i => i.Quantity).HasColumnName("quantity");
+                entity.Property(i => i.PriceCredits).HasColumnName("price_credits");
+                entity.Property(i => i.SortOrder).HasColumnName("sort_order");
+                entity.Property(i => i.IsEnabled).HasColumnName("is_enabled");
+                entity.Property(i => i.IsGiftable).HasColumnName("is_giftable");
+            });
+
+            modelBuilder.Entity<AccountCredits>(entity =>
+            {
+                entity.ToTable("account_credits");
+                entity.HasKey(c => c.AccountId);
+
+                entity.Property(c => c.AccountId).HasColumnName("account_id").ValueGeneratedNever();
+                entity.Property(c => c.Balance).HasColumnName("balance");
+                entity.Property(c => c.UpdatedAtTicks).HasColumnName("updated_at_ticks");
+            });
+
+            modelBuilder.Entity<Mail>(entity =>
+            {
+                entity.ToTable("mail");
+                entity.HasKey(m => m.Id);
+
+                entity.Property(m => m.Id).HasColumnName("id").ValueGeneratedOnAdd();
+                entity.Property(m => m.CharacterId).HasColumnName("character_id");
+                entity.Property(m => m.Sender).HasColumnName("sender").HasMaxLength(64).IsRequired();
+                entity.Property(m => m.Subject).HasColumnName("subject").HasMaxLength(128).IsRequired();
+                entity.Property(m => m.Gold).HasColumnName("gold");
+                entity.Property(m => m.ItemTemplateId).HasColumnName("item_template_id");
+                entity.Property(m => m.ItemQuantity).HasColumnName("item_quantity");
+                entity.Property(m => m.CreatedAtTicks).HasColumnName("created_at_ticks");
+
+                entity.HasIndex(m => m.CharacterId);
+            });
+
+            modelBuilder.Entity<MailReceipt>(entity =>
+            {
+                entity.ToTable("mail_receipts");
+                entity.HasKey(r => r.DeliveryKey);
+
+                entity.Property(r => r.DeliveryKey).HasColumnName("delivery_key").HasMaxLength(64).ValueGeneratedNever();
+                entity.Property(r => r.CreatedAtTicks).HasColumnName("created_at_ticks");
+            });
+
             modelBuilder.Entity<CharacterQuest>(entity =>
             {
                 entity.ToTable("character_quests");

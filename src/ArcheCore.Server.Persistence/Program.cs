@@ -465,4 +465,404 @@ app.MapPost("/characters/quests/save", async (HttpContext context, PersistenceDb
     }
 });
 
+// ── Cash shop ────────────────────────────────────────────────────────
+//
+// The catalogue and the credit balances live in THIS database, next to the
+// mailbox the goods are delivered to, which is what lets a purchase be one
+// transaction: check the balance, deduct it, post the mail. There is no
+// moment where an account has been charged and nothing was sent.
+//
+// Credits are per ACCOUNT (one purse for all your characters) and have
+// nothing to do with gold. Delivery is to the CHARACTER who bought it.
+
+app.MapPost("/cashshop/catalog", async (HttpContext context, PersistenceDbContext db) =>
+{
+    var request = await context.Request.ReadMsgPackAsync<W2PCashShopCatalogRequest>();
+    if (request is null) { context.Response.StatusCode = StatusCodes.Status400BadRequest; return; }
+
+    var items = await db.CashShopItems.AsNoTracking()
+        .Where(i => i.IsEnabled)
+        .OrderBy(i => i.SortOrder).ThenBy(i => i.Id)
+        .Select(i => new CashShopItemDto
+        {
+            Id = i.Id, DisplayName = i.DisplayName, Category = i.Category,
+            ItemTemplateId = i.ItemTemplateId, Quantity = i.Quantity,
+            PriceCredits = i.PriceCredits, SortOrder = i.SortOrder,
+            IsGiftable = i.IsGiftable
+        })
+        .ToArrayAsync();
+
+    var purse = await db.AccountCredits.AsNoTracking().FirstOrDefaultAsync(c => c.AccountId == request.AccountId);
+
+    await context.Response.WriteMsgPackAsync(new P2WCashShopCatalogResponse
+    {
+        Items = items,
+        Balance = purse?.Balance ?? 0
+    });
+});
+
+app.MapPost("/cashshop/buy", async (HttpContext context, PersistenceDbContext db) =>
+{
+    var request = await context.Request.ReadMsgPackAsync<W2PCashShopBuyRequest>();
+    if (request is null) { context.Response.StatusCode = StatusCodes.Status400BadRequest; return; }
+
+    // The character must belong to the account paying for it.
+    var owns = await db.Characters.AsNoTracking()
+        .AnyAsync(c => c.CharacterId == request.CharacterId && c.AccountId == request.AccountId);
+
+    if (!owns)
+    {
+        Console.Error.WriteLine(
+            $"[Persistence] Cash shop purchase rejected: CharacterId={request.CharacterId} " +
+            $"not owned by AccountId={request.AccountId}.");
+        await context.Response.WriteMsgPackAsync(new P2WCashShopBuyResponse { Bought = false, Reason = "That character isn't yours." });
+        return;
+    }
+
+    await using var tx = await db.Database.BeginTransactionAsync();
+
+    var item = await db.CashShopItems.AsNoTracking()
+        .FirstOrDefaultAsync(i => i.Id == request.CashShopItemId && i.IsEnabled);
+
+    if (item is null)
+    {
+        await tx.RollbackAsync();
+        await context.Response.WriteMsgPackAsync(new P2WCashShopBuyResponse { Bought = false, Reason = "That isn't for sale." });
+        return;
+    }
+
+    var purse = await db.AccountCredits.FirstOrDefaultAsync(c => c.AccountId == request.AccountId);
+    int balance = purse?.Balance ?? 0;
+
+    if (balance < item.PriceCredits)
+    {
+        await tx.RollbackAsync();
+        await context.Response.WriteMsgPackAsync(new P2WCashShopBuyResponse
+        {
+            Bought = false,
+            Reason = $"That costs {item.PriceCredits} credits and you have {balance}.",
+            Balance = balance
+        });
+        return;
+    }
+
+    if (purse is null)
+    {
+        purse = new AccountCredits { AccountId = request.AccountId, Balance = 0 };
+        db.AccountCredits.Add(purse);
+    }
+
+    // Charge and deliver together. Either both happen or neither does.
+    purse.Balance = balance - item.PriceCredits;
+    purse.UpdatedAtTicks = DateTime.UtcNow.Ticks;
+
+    db.Mail.Add(new Mail
+    {
+        CharacterId    = request.CharacterId,
+        Sender         = "Cash Shop",
+        Subject        = Clip($"Purchase: {item.DisplayName}", 128),
+        Gold           = 0,
+        ItemTemplateId = item.ItemTemplateId,
+        ItemQuantity   = item.Quantity,
+        CreatedAtTicks = DateTime.UtcNow.Ticks
+    });
+
+    await db.SaveChangesAsync();
+    await tx.CommitAsync();
+
+    Console.WriteLine($"[Persistence] Account {request.AccountId} bought '{item.DisplayName}' " +
+                      $"for {item.PriceCredits} credits; {purse.Balance} left.");
+
+    await context.Response.WriteMsgPackAsync(new P2WCashShopBuyResponse
+    {
+        Bought = true,
+        Balance = purse.Balance,
+        DeliveredName = item.DisplayName,
+        DeliveredQuantity = item.Quantity
+    });
+});
+
+// Mail subjects are capped at 128 characters; a long item name mustn't turn a paid purchase into an error.
+static string Clip(string text, int max) => text.Length <= max ? text : text[..max];
+
+// ── Gifting ──────────────────────────────────────────────────────────
+//
+// Buy a cash shop item FOR ANOTHER CHARACTER. Same shape as a purchase - check
+// the balance, deduct it, post the mail, all in one transaction - except that
+// the account charged is the SENDER's and the mail goes to the RECIPIENT's
+// mailbox, from the sender's name.
+//
+// Only items whose is_giftable flag is set can be sent. That's checked here,
+// not just by hiding the button: the button is a courtesy, this is the rule.
+
+app.MapPost("/cashshop/gift", async (HttpContext context, PersistenceDbContext db) =>
+{
+    var request = await context.Request.ReadMsgPackAsync<W2PCashShopGiftRequest>();
+    if (request is null) { context.Response.StatusCode = StatusCodes.Status400BadRequest; return; }
+
+    static P2WCashShopBuyResponse No(string reason, int balance = 0) => new() { Bought = false, Reason = reason, Balance = balance };
+
+    string recipientName = (request.RecipientName ?? "").Trim();
+
+    if (recipientName.Length == 0 || recipientName.Length > 64)
+    {
+        await context.Response.WriteMsgPackAsync(No("Type the name of the character to send it to."));
+        return;
+    }
+
+    // The sender must be a character on the account that's paying.
+    var sender = await db.Characters.AsNoTracking()
+        .FirstOrDefaultAsync(c => c.CharacterId == request.CharacterId && c.AccountId == request.AccountId);
+
+    if (sender is null)
+    {
+        Console.Error.WriteLine(
+            $"[Persistence] Cash shop gift rejected: CharacterId={request.CharacterId} " +
+            $"not owned by AccountId={request.AccountId}.");
+        await context.Response.WriteMsgPackAsync(No("That character isn't yours."));
+        return;
+    }
+
+    await using var tx = await db.Database.BeginTransactionAsync();
+
+    var item = await db.CashShopItems.AsNoTracking()
+        .FirstOrDefaultAsync(i => i.Id == request.CashShopItemId && i.IsEnabled);
+
+    if (item is null)
+    {
+        await tx.RollbackAsync();
+        await context.Response.WriteMsgPackAsync(No("That isn't for sale."));
+        return;
+    }
+
+    if (!item.IsGiftable)
+    {
+        await tx.RollbackAsync();
+        await context.Response.WriteMsgPackAsync(No("That can't be given as a gift."));
+        return;
+    }
+
+    var recipient = await db.Characters.AsNoTracking().FirstOrDefaultAsync(c => c.Name == recipientName);
+
+    if (recipient is null)
+    {
+        await tx.RollbackAsync();
+        await context.Response.WriteMsgPackAsync(No($"There's no character named {recipientName}."));
+        return;
+    }
+
+    if (recipient.CharacterId == sender.CharacterId)
+    {
+        await tx.RollbackAsync();
+        await context.Response.WriteMsgPackAsync(No("That's you - just buy it for yourself."));
+        return;
+    }
+
+    var purse = await db.AccountCredits.FirstOrDefaultAsync(c => c.AccountId == request.AccountId);
+    int balance = purse?.Balance ?? 0;
+
+    if (balance < item.PriceCredits)
+    {
+        await tx.RollbackAsync();
+        await context.Response.WriteMsgPackAsync(No($"That costs {item.PriceCredits} credits and you have {balance}.", balance));
+        return;
+    }
+
+    if (purse is null)
+    {
+        purse = new AccountCredits { AccountId = request.AccountId, Balance = 0 };
+        db.AccountCredits.Add(purse);
+    }
+
+    // Charge the sender and deliver to the recipient together. Either both happen or neither does.
+    purse.Balance = balance - item.PriceCredits;
+    purse.UpdatedAtTicks = DateTime.UtcNow.Ticks;
+
+    db.Mail.Add(new Mail
+    {
+        CharacterId    = recipient.CharacterId,
+        Sender         = Clip(string.IsNullOrWhiteSpace(sender.Name) ? "Someone" : sender.Name, 64),
+        Subject        = Clip($"Gift: {item.DisplayName}", 128),
+        Gold           = 0,
+        ItemTemplateId = item.ItemTemplateId,
+        ItemQuantity   = item.Quantity,
+        CreatedAtTicks = DateTime.UtcNow.Ticks
+    });
+
+    await db.SaveChangesAsync();
+    await tx.CommitAsync();
+
+    Console.WriteLine($"[Persistence] Account {request.AccountId} (character {sender.CharacterId}) gifted " +
+                      $"'{item.DisplayName}' to character {recipient.CharacterId} ({recipient.Name}) " +
+                      $"for {item.PriceCredits} credits; {purse.Balance} left.");
+
+    await context.Response.WriteMsgPackAsync(new P2WCashShopBuyResponse
+    {
+        Bought = true,
+        Balance = purse.Balance,
+        DeliveredName = item.DisplayName,
+        DeliveredQuantity = item.Quantity,
+        RecipientName = recipient.Name
+    });
+});
+
+// ── The mailbox ──────────────────────────────────────────────────────
+//
+// ONE general mailbox for every character, shared by everything that gives a
+// player something: the auction house, the cash shop, refunds, and admin
+// gifts (see SQL/admin_mail_examples.sql).
+
+static MailDto ToMailDto(Mail m) => new()
+{
+    Id = m.Id, CharacterId = m.CharacterId, Sender = m.Sender, Subject = m.Subject,
+    Gold = m.Gold, ItemTemplateId = m.ItemTemplateId, ItemQuantity = m.ItemQuantity,
+    CreatedAtTicks = m.CreatedAtTicks
+};
+
+app.MapPost("/mail/list", async (HttpContext context, PersistenceDbContext db) =>
+{
+    var request = await context.Request.ReadMsgPackAsync<W2PMailListRequest>();
+    if (request is null) { context.Response.StatusCode = StatusCodes.Status400BadRequest; return; }
+
+    var owns = await db.Characters.AsNoTracking()
+        .AnyAsync(c => c.CharacterId == request.CharacterId && c.AccountId == request.AccountId);
+
+    if (!owns)
+    {
+        context.Response.StatusCode = StatusCodes.Status409Conflict;
+        return;
+    }
+
+    var rows = await db.Mail.AsNoTracking()
+        .Where(m => m.CharacterId == request.CharacterId)
+        .OrderBy(m => m.CreatedAtTicks)
+        .ThenBy(m => m.Id)
+        .ToArrayAsync();
+
+    await context.Response.WriteMsgPackAsync(new P2WMailListResponse { Mail = rows.Select(ToMailDto).ToArray() });
+});
+
+// Deletes AND returns in one transaction - two clicks can't claim it twice.
+app.MapPost("/mail/claim", async (HttpContext context, PersistenceDbContext db) =>
+{
+    var request = await context.Request.ReadMsgPackAsync<W2PMailClaimRequest>();
+    if (request is null) { context.Response.StatusCode = StatusCodes.Status400BadRequest; return; }
+
+    var owns = await db.Characters.AsNoTracking()
+        .AnyAsync(c => c.CharacterId == request.CharacterId && c.AccountId == request.AccountId);
+
+    if (!owns)
+    {
+        context.Response.StatusCode = StatusCodes.Status409Conflict;
+        return;
+    }
+
+    await using var tx = await db.Database.BeginTransactionAsync();
+
+    var row = await db.Mail.FirstOrDefaultAsync(m => m.Id == request.MailId && m.CharacterId == request.CharacterId);
+
+    if (row is null)
+    {
+        await tx.RollbackAsync();
+        await context.Response.WriteMsgPackAsync(new P2WMailClaimResponse { Claimed = false });
+        return;
+    }
+
+    db.Mail.Remove(row);
+
+    try
+    {
+        await db.SaveChangesAsync();
+    }
+    catch (DbUpdateConcurrencyException)
+    {
+        // A second click got here at the same moment and deleted it first.
+        await tx.RollbackAsync();
+        await context.Response.WriteMsgPackAsync(new P2WMailClaimResponse { Claimed = false });
+        return;
+    }
+
+    await tx.CommitAsync();
+
+    await context.Response.WriteMsgPackAsync(new P2WMailClaimResponse { Claimed = true, Mail = ToMailDto(row) });
+});
+
+// Post something to a character. Called by the world server (refunds, a claim
+// it couldn't deliver) and by the auction service's outbox.
+//
+// A DeliveryKey makes it safe to repeat: the first send posts the mail and
+// records a receipt IN THE SAME TRANSACTION; any later send with that key is
+// answered "sent" without posting again.
+app.MapPost("/mail/send", async (HttpContext context, PersistenceDbContext db) =>
+{
+    var request = await context.Request.ReadMsgPackAsync<W2PMailSendRequest>();
+    if (request is null) { context.Response.StatusCode = StatusCodes.Status400BadRequest; return; }
+
+    if (request.Gold < 0 || request.ItemQuantity < 0 || (request.ItemTemplateId != 0 && request.ItemQuantity < 1))
+    {
+        await context.Response.WriteMsgPackAsync(new P2WMailSendResponse { Sent = false, Reason = "Invalid mail contents." });
+        return;
+    }
+
+    var exists = await db.Characters.AsNoTracking().AnyAsync(c => c.CharacterId == request.CharacterId);
+
+    if (!exists)
+    {
+        await context.Response.WriteMsgPackAsync(new P2WMailSendResponse { Sent = false, Reason = "No such character." });
+        return;
+    }
+
+    string? key = string.IsNullOrWhiteSpace(request.DeliveryKey) ? null : request.DeliveryKey.Trim();
+
+    if (key is not null && key.Length > 64)
+    {
+        await context.Response.WriteMsgPackAsync(new P2WMailSendResponse { Sent = false, Reason = "Delivery key too long." });
+        return;
+    }
+
+    if (key is not null && await db.MailReceipts.AsNoTracking().AnyAsync(r => r.DeliveryKey == key))
+    {
+        await context.Response.WriteMsgPackAsync(new P2WMailSendResponse { Sent = true });
+        return;
+    }
+
+    long now = DateTime.UtcNow.Ticks;
+
+    db.Mail.Add(new Mail
+    {
+        CharacterId    = request.CharacterId,
+        Sender         = string.IsNullOrWhiteSpace(request.Sender) ? "System" : request.Sender,
+        Subject        = request.Subject ?? "",
+        Gold           = request.Gold,
+        ItemTemplateId = request.ItemTemplateId,
+        ItemQuantity   = request.ItemQuantity,
+        CreatedAtTicks = now
+    });
+
+    if (key is not null)
+        db.MailReceipts.Add(new MailReceipt { DeliveryKey = key, CreatedAtTicks = now });
+
+    try
+    {
+        // One SaveChanges is one transaction: the mail and its receipt land together or not at all.
+        await db.SaveChangesAsync();
+    }
+    catch (DbUpdateException) when (key is not null)
+    {
+        // Two sends of the same key raced and the primary key let one win.
+        // If the receipt exists now, that's a success, not an error.
+        db.ChangeTracker.Clear();
+
+        if (await db.MailReceipts.AsNoTracking().AnyAsync(r => r.DeliveryKey == key))
+        {
+            await context.Response.WriteMsgPackAsync(new P2WMailSendResponse { Sent = true });
+            return;
+        }
+
+        throw;
+    }
+
+    await context.Response.WriteMsgPackAsync(new P2WMailSendResponse { Sent = true });
+});
+
 app.Run();

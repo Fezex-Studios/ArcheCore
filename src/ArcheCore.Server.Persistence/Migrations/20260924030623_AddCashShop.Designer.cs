@@ -3,6 +3,7 @@ using ArcheCore.PersistenceServer.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ArcheCore.Server.Persistence.Migrations
 {
     [DbContext(typeof(PersistenceDbContext))]
-    partial class PersistenceDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260924030623_AddCashShop")]
+    partial class AddCashShop
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -65,10 +68,6 @@ namespace ArcheCore.Server.Persistence.Migrations
                         .HasColumnType("tinyint(1)")
                         .HasColumnName("is_enabled");
 
-                    b.Property<bool>("IsGiftable")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("is_giftable");
-
                     b.Property<int>("ItemTemplateId")
                         .HasColumnType("int")
                         .HasColumnName("item_template_id");
@@ -88,6 +87,54 @@ namespace ArcheCore.Server.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("cash_shop_items", (string)null);
+                });
+
+            modelBuilder.Entity("ArcheCore.PersistenceServer.Api.Models.CashShopMail", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("CharacterId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("character_id");
+
+                    b.Property<long>("CreatedAtTicks")
+                        .HasColumnType("bigint")
+                        .HasColumnName("created_at_ticks");
+
+                    b.Property<int>("Gold")
+                        .HasColumnType("int")
+                        .HasColumnName("gold");
+
+                    b.Property<int>("ItemQuantity")
+                        .HasColumnType("int")
+                        .HasColumnName("item_quantity");
+
+                    b.Property<int>("ItemTemplateId")
+                        .HasColumnType("int")
+                        .HasColumnName("item_template_id");
+
+                    b.Property<string>("Sender")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)")
+                        .HasColumnName("sender");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("varchar(128)")
+                        .HasColumnName("subject");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CharacterId");
+
+                    b.ToTable("cash_shop_mail", (string)null);
                 });
 
             modelBuilder.Entity("ArcheCore.PersistenceServer.Api.Models.Character", b =>
@@ -200,70 +247,6 @@ namespace ArcheCore.Server.Persistence.Migrations
                     b.HasIndex("CharacterId");
 
                     b.ToTable("character_quests", (string)null);
-                });
-
-            modelBuilder.Entity("ArcheCore.PersistenceServer.Api.Models.Mail", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasColumnName("id");
-
-                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<long>("Id"));
-
-                    b.Property<long>("CharacterId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("character_id");
-
-                    b.Property<long>("CreatedAtTicks")
-                        .HasColumnType("bigint")
-                        .HasColumnName("created_at_ticks");
-
-                    b.Property<int>("Gold")
-                        .HasColumnType("int")
-                        .HasColumnName("gold");
-
-                    b.Property<int>("ItemQuantity")
-                        .HasColumnType("int")
-                        .HasColumnName("item_quantity");
-
-                    b.Property<int>("ItemTemplateId")
-                        .HasColumnType("int")
-                        .HasColumnName("item_template_id");
-
-                    b.Property<string>("Sender")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("varchar(64)")
-                        .HasColumnName("sender");
-
-                    b.Property<string>("Subject")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("varchar(128)")
-                        .HasColumnName("subject");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CharacterId");
-
-                    b.ToTable("mail", (string)null);
-                });
-
-            modelBuilder.Entity("ArcheCore.PersistenceServer.Api.Models.MailReceipt", b =>
-                {
-                    b.Property<string>("DeliveryKey")
-                        .HasMaxLength(64)
-                        .HasColumnType("varchar(64)")
-                        .HasColumnName("delivery_key");
-
-                    b.Property<long>("CreatedAtTicks")
-                        .HasColumnType("bigint")
-                        .HasColumnName("created_at_ticks");
-
-                    b.HasKey("DeliveryKey");
-
-                    b.ToTable("mail_receipts", (string)null);
                 });
 
             modelBuilder.Entity("ArcheCore.PersistenceServer.Api.Models.CharacterInventoryItem", b =>

@@ -1,3 +1,4 @@
+using ArcheCore.Server.World.AuctionServer;
 using ArcheCore.Server.World.Core.Interaction;
 using ArcheCore.Library.Net.Worldserver;
 using ArcheCore.Network.Client;
@@ -48,6 +49,10 @@ public class WorldServer : IHostedService, INetEventListener
     private InteractionActionCatalog _interactionActions;
     private MountManager _mountManager;
     private PetManager _petManager;
+    private AuctionClient _auctionClient;
+    private MailManager _mailManager;
+    private AuctionManager _auctionManager;
+    private CashShopManager _cashShopManager;
     private CombatManager _combatManager;
     private CancellationTokenSource _tickCts;
     private Task _tickLoop;
@@ -196,6 +201,17 @@ public class WorldServer : IHostedService, INetEventListener
         _playerManager.Mounts = _mountManager;
         _playerManager.Pets = _petManager;
 
+        // The market. The auction house is its own service with its own
+        // database; the cash shop and the ONE general mailbox live on the
+        // persistence server. Everything a player receives from either -
+        // sale proceeds, purchases, unsold listings, gifts - arrives by mail.
+        _auctionClient = new AuctionClient(_world);
+        _mailManager = new MailManager(
+            _persistenceClient, _playerManager, _itemManager, _playerManager.EnqueueAction);
+        _auctionManager = new AuctionManager(
+            _auctionClient, _persistenceClient, _playerManager, _itemManager, _playerManager.EnqueueAction);
+        _cashShopManager = new CashShopManager(_persistenceClient, _playerManager.EnqueueAction);
+
         // The AI needs combat to hit players, combat needs the AI to kill
         // NPCs - one has to be built first, so the link is made here.
         _npcAiManager.SetCombat(_combatManager);
@@ -264,6 +280,9 @@ public class WorldServer : IHostedService, INetEventListener
 
                     // Corpse expiry.
                     _lootManager.Tick();
+
+                    // Expired listings go home by mail, about once a minute.
+                    _auctionManager.Tick();
 
                     // Spread-out periodic saves of dirty characters.
                     _playerManager.RunAutosave(tick);
@@ -344,6 +363,9 @@ public class WorldServer : IHostedService, INetEventListener
         services.Register(_questManager);
         services.Register(_mountManager);
         services.Register(_petManager);
+        services.Register(_mailManager);
+        services.Register(_auctionManager);
+        services.Register(_cashShopManager);
         services.Register(_combatManager);
 
         _packetDispatcher.AutoRegister(services.Resolve, typeof(WorldServer).Assembly);

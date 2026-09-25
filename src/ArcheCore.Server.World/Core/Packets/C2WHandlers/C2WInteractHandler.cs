@@ -2,6 +2,7 @@ using ArcheCore.Network.Shared;
 using ArcheCore.Library.Net.Worldserver;
 using System.Numerics;
 using ArcheCore.Network.Shared.Packets.C2W;
+using ArcheCore.Network.Shared.Packets.PersistenceServer;
 using ArcheCore.Network.Shared.Packets.W2C;
 using ArcheCore.Network.Worldserver;
 using ArcheCore.Server.World.Core.Entities;
@@ -48,6 +49,9 @@ namespace ArcheCore.Server.World.Networking.C2W
         private readonly ShopManager _shops;
         private readonly LootManager _loot;
         private readonly QuestManager _quests;
+        private readonly MailManager _mail;
+        private readonly AuctionManager _auctions;
+        private readonly CashShopManager _cashShop;
 
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
@@ -58,8 +62,14 @@ namespace ArcheCore.Server.World.Networking.C2W
             HarvestManager harvest,
             ShopManager shops,
             LootManager loot,
-            QuestManager quests)
+            QuestManager quests,
+            MailManager mail,
+            AuctionManager auctions,
+            CashShopManager cashShop)
         {
+            _mail = mail;
+            _auctions = auctions;
+            _cashShop = cashShop;
             _playerManager = playerManager;
             _interactions = interactions;
             _actions = actions;
@@ -162,6 +172,21 @@ namespace ArcheCore.Server.World.Networking.C2W
                 case InteractionActionType.Quests:
                     if (target is NpcEntity questGiver && session != null)
                         _quests.SendOffers(peer, session, questGiver);
+                    break;
+
+                case InteractionActionType.Mailbox:
+                    if (_playerManager.TryGetSession(peer, out var mailSession))
+                        _ = _mail.SendMailboxAsync(peer, mailSession);
+                    break;
+
+                case InteractionActionType.Auction:
+                    if (_playerManager.TryGetSession(peer, out var auctionSession))
+                        _ = _auctions.BrowseAsync(peer, auctionSession, search: null, mineOnly: false);
+                    break;
+
+                case InteractionActionType.CashShop:
+                    if (_playerManager.TryGetSession(peer, out var cashSession))
+                        _ = _cashShop.BrowseAsync(peer, cashSession);
                     break;
 
                 case InteractionActionType.Climb:

@@ -42,6 +42,13 @@ public class WorldServerConfig
     public bool AllowPlayerVersusPlayer { get; set; } = false;
 
     /// <summary>
+    /// Where ArcheCore.Server.Auction is listening. That service has its own
+    /// MySQL database holding the listings and the auction mailbox; this
+    /// server never touches it directly.
+    /// </summary>
+    public string AuctionServerUrl { get; set; } = "http://127.0.0.1:5090";
+
+    /// <summary>
     /// Path to this zone's exported terrain heightmap (see
     /// TerrainHeightmapExporter / HeightmapData), used by MovementValidator
     /// to reject positions it can prove are below the actual ground -
