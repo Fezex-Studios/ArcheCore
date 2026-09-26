@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using System.Numerics;
 
 namespace ArcheCore.Server.World.Managers
@@ -27,6 +25,20 @@ namespace ArcheCore.Server.World.Managers
     /// Everything the server knows about one connected player, attached
     /// directly to the owning NetPeer via peer.Tag.
     ///
+    /// The session itself holds identity, where the player is and save
+    /// bookkeeping. Each system's state lives in its own component
+    /// (roadmap fix-first #3), so a system only touches its own part:
+    ///
+    ///   Inventory  gold, bag, item cooldowns          saved
+    ///   Quests     quest log                          saved
+    ///   Combat     health, death, skill cooldowns
+    ///   Mount      mount, speed multiplier, pet
+    ///   Movement   MovementValidator's budgets
+    ///   Market     auction/mail NPC, in-flight mail claims
+    ///
+    /// Saved components implement IPersistentComponent and are listed in
+    /// PersistentComponents; the save snapshot and IsDirty go through them.
+    ///
     /// Lifecycle:
     ///   - Created by TrackPendingSelection right after auth succeeds.
     ///     NetworkId is null - authenticated, no character in world yet.
@@ -49,147 +61,58 @@ namespace ArcheCore.Server.World.Managers
         public Vector3  Position;
 
         /// <summary>
-        /// Gold balance. Server-authoritative - the ONLY place this
-        /// should ever be written is PlayerManager.TryAddGold.
-        /// </summary>
-        public int       Gold;
-
-        /// <summary>
-        /// Inventory slots. Server-authoritative the same way Gold is -
-        /// the ONLY place this array should ever be written is
-        /// PlayerManager.TryAddItem, TryMoveItem, TryDropItem and TryUseItem.
-        /// </summary>
-        public InventorySlot[] Inventory = new InventorySlot[InventoryConstants.SlotCount];
-
-        /// <summary>
-        /// Item cooldowns: ItemManager.CooldownKey -> expiry, in
-        /// ServerClock.NowMs milliseconds (monotonic, so a system
-        /// clock change can't unlock a potion). Keyed by group, never by
-        /// slot, so moving an item can't reset its timer.
-        ///
-        /// Not persisted - a relog clears every cooldown. Fine for 30s
-        /// potions; add it to the save when something has an hour-long one.
-        /// </summary>
-        public readonly Dictionary<int, long> ItemCooldowns = new();
-
-        // ── Combat (roadmap G/H) ──
-
-        /// <summary>
-        /// Current and max health. Not persisted: set to full from
-        /// HealthRules.PlayerMaxHealth(Level) at spawn. Changed only through
-        /// PlayerManager (heals, level-ups) and CombatManager (damage, J).
-        /// </summary>
-        public int Health;
-        public int MaxHealth;
-        public bool IsDead => MaxHealth > 0 && Health <= 0;
-
-        /// <summary>Skill id -> ServerClock.NowMs when it's ready again.</summary>
-        public readonly Dictionary<int, long> SkillCooldowns = new();
-
-        // ── Mount (roadmap N) ──
-
-        /// <summary>Mounts.Id being ridden, or 0. Not persisted: you start on foot.</summary>
-        public int MountId;
-
-        /// <summary>
-        /// What the movement check allows, relative to normal. 1 on foot, the
-        /// mount's multiplier while riding. Set only by MountManager.
-        /// </summary>
-        public float SpeedMultiplier = 1f;
-
-        /// <summary>Network id of this player's summoned pet, or 0 (roadmap O).</summary>
-        public int PetNetworkId;
-
-        /// <summary>
         /// Zone the player is standing in (ZoneMap id, 0 = none). Kept current
         /// by PlayerManager on every accepted move and teleport; changing it
         /// fires PlayerEvent.OnEnterZone. Not persisted - recomputed on spawn.
         /// </summary>
         public ushort ZoneId;
 
-        /// <summary>
-        /// Network id of the NPC the player last opened the auction house or
-        /// mailbox at, or 0. Every auction/mail packet is checked against it
-        /// (MarketAccess) - audit H4.
-        /// </summary>
-        public int MarketTargetId;
-
-        /// <summary>Where this player died - picks the nearest respawn point.</summary>
-        public Vector3 DiedAt;
-
-        // ── Quests (roadmap K) ──
-
-        /// <summary>
-        /// Every quest this character has touched, by quest id. Loaded on
-        /// spawn, saved like the inventory: only when QuestsDirty says
-        /// something changed.
-        /// </summary>
-        public readonly Dictionary<int, QuestProgress> Quests = new();
-
-        /// <summary>Set by QuestManager on any change; cleared by the save.</summary>
-        public bool QuestsDirty;
-
-        /// <summary>
-        /// Quest rows loaded for quests that no longer exist in the game data.
-        /// Not shown or used - just written back with every save, so taking a
-        /// quest out of the data (temporarily, by mistake) doesn't erase
-        /// everyone's progress in it.
-        /// </summary>
-        public ArcheCore.Network.Shared.Packets.PersistenceServer.QuestStateDto[] UnknownQuestRows;
-
-        /// <summary>
-        /// Mail ids whose claim-save is in flight. A second claim of the same
-        /// mail is ignored until the first has an answer, so one mail can't be
-        /// paid out twice in memory.
-        /// </summary>
-        public readonly HashSet<long> ClaimingMail = new();
-
         /// <summary>A select/create for this peer is already in flight or done.</summary>
         public bool     SpawnRequested;
 
-        // --- Save tracking (see AutosaveScheduler / CharacterPersistence) ---
+        // ── Components ──
+
+        public readonly InventoryComponent Inventory = new();
+        public readonly QuestComponent     Quests    = new();
+        public readonly CombatComponent    Combat    = new();
+        public readonly MountComponent     Mount     = new();
+        public readonly MovementComponent  Movement  = new();
+        public readonly MarketComponent    Market    = new();
+
+        /// <summary>Every saved component, in snapshot order.</summary>
+        public readonly IPersistentComponent[] PersistentComponents;
+
+        public PlayerSession()
+        {
+            PersistentComponents = new IPersistentComponent[] { Inventory, Quests };
+        }
+
+        // ── Save tracking (see AutosaveScheduler / CharacterPersistence) ──
 
         /// <summary>False until the current state is known to match the database.</summary>
         public bool     HasBeenSaved;
         public Vector3  SavedPosition;
         public int      SavedLevel;
-        public int      SavedGold;
 
         /// <summary>
-        /// The inventory as of the last save snapshot. Every save sends the
-        /// whole inventory now (see CharacterPersistence), so this is only
-        /// kept for comparisons and debugging.
+        /// Moved more than 10cm, changed level or any saved component since
+        /// the last save snapshot - or the last save failed.
         /// </summary>
-        public InventorySlot[] SavedInventory = new InventorySlot[InventoryConstants.SlotCount];
+        public bool IsDirty
+        {
+            get
+            {
+                if (!HasBeenSaved || Level != SavedLevel ||
+                    Vector3.DistanceSquared(Position, SavedPosition) > 0.01f)
+                    return true;
 
-        /// <summary>
-        /// True whenever Inventory may differ from the last save snapshot.
-        /// A bool flip, not a 20-slot array compare, because this is
-        /// checked once per player per autosave pass. Set by every inventory
-        /// change; cleared when a snapshot is taken.
-        /// </summary>
-        public bool InventoryDirty;
+                foreach (var component in PersistentComponents)
+                    if (component.IsDirty)
+                        return true;
 
-        // --- Movement validation (see MovementValidator) ---
-
-        public bool     MoveBaselineSet;
-        public Vector3  LastValidPosition;
-        public double   LastMoveTime;
-        public float    HorizontalBudget;
-        public float    UpBudget;
-        public float    DownBudget;
-        public int      MovementViolations;
-        public double   LastCorrectionTime;
-
-        /// <summary>Moved more than 10cm, changed level, gold, inventory or
-        /// quests since the last save snapshot - or the last save failed.</summary>
-        public bool IsDirty =>
-            !HasBeenSaved ||
-            Level != SavedLevel ||
-            Gold  != SavedGold ||
-            InventoryDirty ||
-            QuestsDirty ||
-            Vector3.DistanceSquared(Position, SavedPosition) > 0.01f;
+                return false;
+            }
+        }
 
         /// <summary>
         /// Declares the CURRENT in-memory state saved: right after a fresh
@@ -203,9 +126,9 @@ namespace ArcheCore.Server.World.Managers
             HasBeenSaved  = true;
             SavedPosition = Position;
             SavedLevel    = Level;
-            SavedGold     = Gold;
-            Array.Copy(Inventory, SavedInventory, InventoryConstants.SlotCount);
-            InventoryDirty = false;
+
+            foreach (var component in PersistentComponents)
+                component.MarkSaved();
         }
     }
 }

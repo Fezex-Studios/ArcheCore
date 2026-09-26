@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using ArcheCore.Server.World.Core.Entities;
+using ArcheCore.Server.World.Core.Interaction;
 using ArcheCore.Server.World.GameData.Npcs;
 using ArcheCore.Server.World.GameData.World.Spawners;
 using ArcheCore.Server.World.Networking.W2C;
@@ -37,8 +38,14 @@ namespace ArcheCore.Server.World.Managers;
 /// now a same-thread deferral (applied next tick) rather than a
 /// cross-thread handoff.
 /// </summary>
-public class SpawnManager
+public class SpawnManager : ArcheCore.Server.World.Core.Services.IInitializable
 {
+    private InteractionActionCatalog _actions;
+
+    /// <summary>Two-phase start-up: spawn packets carry each NPC's F/G actions.</summary>
+    public void Initialize(ArcheCore.Server.World.Core.Services.ServiceContainer services) =>
+        _actions = services.Get<InteractionActionCatalog>();
+
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
     private static readonly Random _rng   = new();
 
@@ -295,7 +302,7 @@ public class SpawnManager
     {
         if (_npcSpawner.TryGet(networkId, out var npc))
         {
-            W2CSpawnNpcPacketSender.Send(replication, peer, npc);
+            W2CSpawnNpcPacketSender.Send(replication, peer, npc, _actions.For(InteractableKind.Npc, npc.TemplateId));
             return true;
         }
 

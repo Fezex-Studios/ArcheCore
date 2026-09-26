@@ -21,15 +21,10 @@ namespace ArcheCore.Server.World.Core.Interaction
     /// checks every request against the SAME list (so a client can't ask a
     /// rock to trade, or climb a tree that only offers Chop).
     ///
-    /// Current is a static handle for the static W2C senders, which have no
-    /// other way to reach it. It's set once at boot, before any player can
-    /// connect, and never changes afterwards.
     /// </summary>
     public class InteractionActionCatalog
     {
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
-
-        public static InteractionActionCatalog Current { get; private set; }
 
         private static readonly InteractionActionData[] None = Array.Empty<InteractionActionData>();
 
@@ -87,7 +82,6 @@ namespace ArcheCore.Server.World.Core.Interaction
                     .ToArray();
             }
 
-            Current = this;
             Logger.Info("[Actions] Loaded {Rows} action(s) for {Targets} target(s).", valid.Count, _byTarget.Count);
         }
 
@@ -98,10 +92,6 @@ namespace ArcheCore.Server.World.Core.Interaction
             if (_byTarget.TryGetValue(((int)kind, 0), out var defaults)) return defaults;
             return None;
         }
-
-        /// <summary>Static convenience for senders; empty until the catalog has loaded.</summary>
-        public static InteractionActionData[] ActionsFor(InteractableKind kind, int templateId) =>
-            Current != null ? Current.For(kind, templateId) : None;
 
         /// <summary>Does this object offer this action? (Enabled or not - the caller decides what "disabled" says.)</summary>
         public bool TryGet(InteractableKind kind, int templateId, int actionType, out InteractionActionData action)

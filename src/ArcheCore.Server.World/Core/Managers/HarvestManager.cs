@@ -1,4 +1,5 @@
 using System;
+using ArcheCore.Server.World.Core.Interaction;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
@@ -55,7 +56,7 @@ namespace ArcheCore.Server.World.Managers
     /// Depleted state is not persisted. A restart brings every node back,
     /// which is fine for respawn timers measured in seconds or minutes.
     /// </summary>
-    public class HarvestManager : IWorldEntitySource
+    public class HarvestManager : IWorldEntitySource, ArcheCore.Server.World.Core.Services.IInitializable
     {
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
         private static readonly Random Rng = new();
@@ -85,7 +86,7 @@ namespace ArcheCore.Server.World.Managers
         private readonly Dictionary<int, ActiveHarvest> _active = new();
 
         /// <summary>Nodes currently waiting to respawn - scanned instead of every node.</summary>
-        private readonly List<HarvestNodeEntity> _depleted = new();
+        private Scheduler _scheduler;
 
         // Scratch buffers, reused every tick (tick thread only).
         private readonly List<int> _finishedScratch = new();
@@ -98,7 +99,17 @@ namespace ArcheCore.Server.World.Managers
             public HarvestNodeEntity Node;
             public Vector3 StartPosition;
             public long CompleteAtMs;
+            public Scheduler.Handle Completion;
         }
+
+        /// <summary>Two-phase start-up: harvest completion and node respawns run on the shared Scheduler.</summary>
+        public void Initialize(ArcheCore.Server.World.Core.Services.ServiceContainer services)
+        {
+            _scheduler = services.Get<Scheduler>();
+            _actions = services.Get<InteractionActionCatalog>();
+        }
+
+        private InteractionActionCatalog _actions;
 
         public HarvestManager(
             IDbContextFactory<WorldDataDbContext> dbFactory,
@@ -199,7 +210,7 @@ namespace ArcheCore.Server.World.Managers
             if (!_nodes.TryGetValue(networkId, out var node))
                 return false;
 
-            W2CSpawnHarvestNodePacketSender.Send(_replication, peer, node);
+            W2CSpawnHarvestNodePacketSender.Send(_replication, peer, node, _actions.For(InteractableKind.HarvestNode, node.TemplateId));
             return true;
         }
 
@@ -227,7 +238,7 @@ namespace ArcheCore.Server.World.Managers
             if (!_players.TryGetSession(peer, out var session) || session.NetworkId == null)
                 return;
 
-            if (session.IsDead)
+            if (session.Combat.IsDead)
             {
                 W2CInteractDeniedPacketSender.Send(peer, "You can't do that while dead.");
                 return;
@@ -270,6 +281,10 @@ namespace ArcheCore.Server.World.Managers
 
             _active[playerId] = harvest;
 
+            // Completion is a Scheduler callback. The per-tick check below
+            // only watches for walking away or disconnecting.
+            harvest.Completion = _scheduler.In(node.Template.HarvestTimeMs, () => Finish(harvest), "harvest");
+
             W2CHarvestStartedPacketSender.Send(peer, node.NetworkId, node.Template.Name, node.Template.HarvestTimeMs);
         }
 
@@ -292,9 +307,6 @@ namespace ArcheCore.Server.World.Managers
 
             if (_active.Count > 0)
                 TickHarvests(now);
-
-            if (_depleted.Count > 0)
-                TickRespawns(now);
         }
 
         private void TickHarvests(long now)
@@ -318,8 +330,6 @@ namespace ArcheCore.Server.World.Managers
                     continue;
                 }
 
-                if (now >= harvest.CompleteAtMs)
-                    _finishedScratch.Add(harvest.PlayerId);
             }
 
             // Resolve outside the loop - Complete/Cancel remove from _active.
@@ -338,6 +348,24 @@ namespace ArcheCore.Server.World.Managers
                 else
                     Complete(harvest);
             }
+        }
+
+        /// <summary>Scheduler callback: the harvest's time is up.</summary>
+        private void Finish(ActiveHarvest harvest)
+        {
+            // Superseded (cancelled, or a new harvest replaced it).
+            if (!_active.TryGetValue(harvest.PlayerId, out var current) || !ReferenceEquals(current, harvest))
+                return;
+
+            bool connected = _players.TryGetSession(harvest.Peer, out var session) &&
+                             session.NetworkId == harvest.PlayerId;
+
+            if (!connected)
+                Release(harvest);
+            else if (Vector3.Distance(session.Position, harvest.StartPosition) > MaxDriftWhileHarvesting)
+                Cancel(harvest, "Interrupted.");
+            else
+                Complete(harvest);
         }
 
         private void Complete(ActiveHarvest harvest)
@@ -377,7 +405,10 @@ namespace ArcheCore.Server.World.Managers
         /// <summary>Forget the harvest and free the node's claim. Sends nothing.</summary>
         private void Release(ActiveHarvest harvest)
         {
-            _active.Remove(harvest.PlayerId);
+            _scheduler.Cancel(harvest.Completion);
+
+            if (_active.TryGetValue(harvest.PlayerId, out var current) && ReferenceEquals(current, harvest))
+                _active.Remove(harvest.PlayerId);
 
             if (harvest.Node.ClaimedBy == harvest.PlayerId)
                 harvest.Node.ClaimedBy = null;
@@ -393,23 +424,14 @@ namespace ArcheCore.Server.World.Managers
 
             node.IsDepleted = true;
             node.RespawnAtMs = ArcheCore.Server.World.ServerClock.NowMs + node.Template.RespawnSeconds * 1000L;
-            _depleted.Add(node);
+
+            _scheduler.In(node.Template.RespawnSeconds * 1000L, () =>
+            {
+                node.IsDepleted = false;
+                BroadcastState(node);
+            }, "node respawn");
 
             BroadcastState(node);
-        }
-
-        private void TickRespawns(long now)
-        {
-            for (int i = _depleted.Count - 1; i >= 0; i--)
-            {
-                var node = _depleted[i];
-                if (now < node.RespawnAtMs)
-                    continue;
-
-                node.IsDepleted = false;
-                _depleted.RemoveAt(i);
-                BroadcastState(node);
-            }
         }
 
         /// <summary>Tell every player who can currently see this node its new state.</summary>

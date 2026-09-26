@@ -65,6 +65,22 @@ public sealed class AuthServerConfig
     public int SessionLifetimeHours { get; set; } = 24;
 
     /// <summary>
+    /// How long a one-shot LAUNCH token lives (launcher L3). It is passed to
+    /// the game on the command line, where other local processes can read it,
+    /// so it should be dead within a couple of minutes whether or not the
+    /// world server burned it. Replaces SessionLifetimeHours for launch
+    /// tokens; that setting is now unused.
+    /// </summary>
+    public int LaunchTokenSeconds { get; set; } = 120;
+
+    /// <summary>
+    /// How long a refresh token (what the launcher keeps instead of the
+    /// password) lives without being used. Every use replaces it with a new
+    /// one, so an active player never hits this.
+    /// </summary>
+    public int RefreshTokenDays { get; set; } = 30;
+
+    /// <summary>
     /// Called once at boot, before the socket opens. Same rule as the other
     /// two servers: a config mistake that would cost you the shard should
     /// cost you a failed startup instead, loudly, while you're watching.
@@ -96,5 +112,11 @@ public sealed class AuthServerConfig
 
         if (SessionLifetimeHours < 1)
             throw new InvalidOperationException("Auth:SessionLifetimeHours must be at least 1.");
+
+        if (LaunchTokenSeconds < 15 || LaunchTokenSeconds > 3600)
+            throw new InvalidOperationException("Auth:LaunchTokenSeconds must be between 15 and 3600.");
+
+        if (RefreshTokenDays < 1)
+            throw new InvalidOperationException("Auth:RefreshTokenDays must be at least 1.");
     }
 }

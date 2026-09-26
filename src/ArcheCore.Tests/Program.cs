@@ -1,5 +1,6 @@
-﻿// ArcheCore.Tests - integration tests for the audit fixes (C1-C3, H3, H5,
-// M1, M3, M4, M7, M8), run against a REAL MySQL/MariaDB and the REAL
+// ArcheCore.Tests - integration tests for the audit fixes (C1-C3, H3, H5,
+// M1, M3, M4, M7, M8) and the roadmap fix-first list (effects, scheduler,
+// session components, two-phase start-up, persistent components), run against a REAL MySQL/MariaDB and the REAL
 // persistence server process. Plain console app: no test framework, so no
 // extra packages. Exit code 0 = all passed.
 //
@@ -9,6 +10,11 @@
 //   ARCHECORE_TEST_DB="Server=127.0.0.1;Port=3306;Database=archecore_test;User=root;Password=...;"
 // The database is DROPPED and recreated on every run, so its name must
 // contain "test" - the run refuses otherwise.
+//
+// The Effects migration test runs on a COPY of ArcheCore.Server.World's
+// Data/worldserver.db (found by walking up from the test's folder; the
+// original is never touched). Point it elsewhere with ARCHECORE_WORLD_DB and
+// ARCHECORE_PATCH_DIR; it's skipped if neither finds anything.
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Numerics;
@@ -22,6 +28,11 @@ using MySqlConnector;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using ArcheCore.Server.World.Networking;
 using Worldserver.ArcheCore.PersistenceServer.Scripts;
+using ArcheCore.Server.World.Core.Effects;
+using ArcheCore.Server.World.GameData.Effects;
+using ArcheCore.Server.World.GameData.Items;
+using ArcheCore.Server.World.Utils.Config;
+using ArcheCore.Server.World.Utils.Database.SQLite;
 
 const string Secret = "integration-test-secret-0123456789-abcdef";
 string Conn = Environment.GetEnvironmentVariable("ARCHECORE_TEST_DB")
@@ -143,8 +154,9 @@ async Task<(long id, PlayerSession s)> NewCharacter(int accountId, string name)
     var s = new PlayerSession
     {
         AccountId = accountId, CharacterId = created.CharacterId, Name = name,
-        Level = load.Level, Gold = load.Gold, Position = new Vector3(load.X, load.Y, load.Z), NetworkId = 1
+        Level = load.Level, Position = new Vector3(load.X, load.Y, load.Z), NetworkId = 1
     };
+    s.Inventory.Gold = load.Gold;
     s.MarkSaved();
     return (created.CharacterId, s);
 }
@@ -192,9 +204,9 @@ Console.WriteLine("\nC1 - the save chain: one in flight, coalesced, newest state
     {
         for (int i = 1; i <= 50; i++)
         {
-            s.Gold = i * 10;
-            s.Inventory[i % 20] = new InventorySlot { ItemTemplateId = 100 + i, Quantity = i };
-            s.InventoryDirty = true;
+            s.Inventory.Gold = i * 10;
+            s.Inventory.Slots[i % 20] = new InventorySlot { ItemTemplateId = 100 + i, Quantity = i };
+            s.Inventory.Dirty = true;
             persistence.SaveInBackground(s);
         }
         return true;
@@ -224,7 +236,7 @@ Console.WriteLine("\nC1 - a lost answer is resolved by asking again, not by gues
     };
     var persistence = new CharacterPersistence(flaky, tickQueue.Enqueue);
 
-    var outcome = await await OnTick(() => { s.Gold = 777; return persistence.SaveNowAsync(s); });
+    var outcome = await await OnTick(() => { s.Inventory.Gold = 777; return persistence.SaveNowAsync(s); });
     var l = await Load(4, id);
 
     Check(outcome == SaveOutcome.Saved, $"outcome Saved after retry ({calls} sends)");
@@ -236,7 +248,7 @@ Console.WriteLine("\nC2 - relog waits for the logout save (the old code loaded f
     var (id, s) = await NewCharacter(5, "Relog");
     // The character has an item, saved.
     var setup = new CharacterPersistence(realSend, tickQueue.Enqueue);
-    await await OnTick(() => { s.Inventory[0] = new InventorySlot { ItemTemplateId = 42, Quantity = 1 }; s.InventoryDirty = true; return setup.SaveNowAsync(s); });
+    await await OnTick(() => { s.Inventory.Slots[0] = new InventorySlot { ItemTemplateId = 42, Quantity = 1 }; s.Inventory.Dirty = true; return setup.SaveNowAsync(s); });
 
     // Logout save that removes the item, on a slow network (1.5s).
     Func<W2PCharacterSaveFullRequest, Task<P2WCharacterSaveFullResponse>> slow = async r =>
@@ -246,7 +258,7 @@ Console.WriteLine("\nC2 - relog waits for the logout save (the old code loaded f
     };
     var persistence = new CharacterPersistence(slow, tickQueue.Enqueue);
     persistence.OnLoaded(id, 1);
-    await OnTick(() => { s.Inventory[0] = default; s.InventoryDirty = true; persistence.SaveInBackground(s); return true; });
+    await OnTick(() => { s.Inventory.Slots[0] = default; s.Inventory.Dirty = true; persistence.SaveInBackground(s); return true; });
 
     // What the OLD login did: load immediately.
     var early = await Load(5, id);
@@ -266,7 +278,7 @@ Console.WriteLine("\nC2 - login times out (refused) while persistence is down, t
     var persistence = new CharacterPersistence(realSend, tickQueue.Enqueue);
     StopServer();
 
-    await OnTick(() => { s.Gold = 4242; persistence.SaveInBackground(s); return true; });
+    await OnTick(() => { s.Inventory.Gold = 4242; persistence.SaveInBackground(s); return true; });
     bool settledDuringOutage = await persistence.WhenSettledAsync(id, TimeSpan.FromSeconds(2));
     Check(!settledDuringOutage, "not settled while the persistence server is down (login would be refused)");
 
@@ -288,9 +300,9 @@ Console.WriteLine("\nC3 - mail claim: character save and mail delete are one tra
 
     var outcome = await await OnTick(() =>
     {
-        s.Gold += mail.Gold;
-        s.Inventory[3] = new InventorySlot { ItemTemplateId = mail.ItemTemplateId, Quantity = mail.ItemQuantity };
-        s.InventoryDirty = true;
+        s.Inventory.Gold += mail.Gold;
+        s.Inventory.Slots[3] = new InventorySlot { ItemTemplateId = mail.ItemTemplateId, Quantity = mail.ItemQuantity };
+        s.Inventory.Dirty = true;
         return persistence.SaveClaimingMailAsync(s, mail.Id);
     });
 
@@ -301,7 +313,7 @@ Console.WriteLine("\nC3 - mail claim: character save and mail delete are one tra
     Check(l.Gold == 250 && l.Inventory.Any(x => x.Slot == 3 && x.ItemTemplateId == 9 && x.Quantity == 5), "character holds the contents");
 
     // The same mail claimed again (double click that got past the in-memory guard).
-    var again = await await OnTick(() => { s.Gold += mail.Gold; return persistence.SaveClaimingMailAsync(s, mail.Id); });
+    var again = await await OnTick(() => { s.Inventory.Gold += mail.Gold; return persistence.SaveClaimingMailAsync(s, mail.Id); });
     var l2 = await Load(7, id);
     Check(again == SaveOutcome.MailGone, "second claim answered MailGone");
     Check(l2.Gold == 250, $"and wrote nothing (gold still {l2.Gold})");
@@ -342,7 +354,7 @@ Console.WriteLine("\nValidation - a malformed save is refused definitively (not 
     var (id, s) = await NewCharacter(9, "Invalid");
     int calls = 0;
     var persistence = new CharacterPersistence(r => { Interlocked.Increment(ref calls); return client.W2PCharacterSaveFull.Send(r); }, tickQueue.Enqueue);
-    var outcome = await await OnTick(() => { s.Gold = -5; return persistence.SaveNowAsync(s); });
+    var outcome = await await OnTick(() => { s.Inventory.Gold = -5; return persistence.SaveNowAsync(s); });
     Check(outcome == SaveOutcome.Failed && calls == 1, $"negative gold -> Failed after {calls} request");
     await Task.Delay(100);
     Check(await OnTick(() => s.IsDirty), "session marked dirty again");
@@ -559,7 +571,284 @@ Console.WriteLine("\nProtocol version - an out-of-date client is refused with a 
           $"older protocol refused with a message: \"{stale.message}\"");
 }
 
+// ═════════════════════════════════════════════════════════════════════
+Console.WriteLine("\nFix-first #2 - one Scheduler");
+{
+    long t = 0;
+    var sched = new ArcheCore.Server.World.Scheduler(() => t);
+    var log = new List<string>();
+
+    sched.In(100, () => log.Add("b"));
+    sched.In(50, () => log.Add("a"));
+    var cancelled = sched.In(60, () => log.Add("never"));
+    sched.At(100, () => log.Add("c"));           // same due time as "b": scheduled later, runs later
+    int every = 0;
+    var rep = sched.Every(40, () => every++);
+    sched.In(70, () => throw new InvalidOperationException("boom"), "throws");
+
+    Check(sched.Cancel(cancelled) && !sched.Cancel(cancelled), "cancel works once, second cancel is a no-op");
+
+    t = 49; sched.RunDue();
+    Check(log.Count == 0 && every == 1, "nothing runs early (repeating ran at 40)");
+    t = 100; int ran = sched.RunDue();
+    Check(string.Join("", log) == "abc", $"due callbacks run in due order, ties in schedule order: '{string.Join("", log)}'");
+    Check(every == 2, "a throwing callback didn't stop the others (repeating ran at 80)");
+
+    t = 1_000; sched.RunDue();
+    Check(every == 3, $"a repeating timer that fell far behind runs once, not in a burst ({every})");
+
+    sched.Cancel(rep);
+    t = 5_000; sched.RunDue();
+    Check(every == 3 && sched.Count == 0, "cancelled repeating timer stops; nothing left queued");
+
+    var chained = new List<long>();
+    sched.In(10, () => { chained.Add(t); sched.In(0, () => chained.Add(t)); });
+    t = 5_010; sched.RunDue();
+    Check(chained.Count == 2, "a callback can schedule another that's already due - it runs the same pass");
+
+    var h = default(ArcheCore.Server.World.Scheduler.Handle);
+    Check(!h.IsValid && !sched.Cancel(h), "the default handle means 'nothing scheduled'");
+}
+
+// ═════════════════════════════════════════════════════════════════════
+Console.WriteLine("\nFix-first #4 - two-phase start-up (no static Current)");
+{
+    var services = new ArcheCore.Server.World.Core.Services.ServiceContainer();
+    var a = new NeedsB();
+    var b = new NeedsA();
+    services.Register(a);
+    services.Register(b);
+    services.InitializeAll();
+    Check(a.B == b && b.A == a, "two managers that need each other are wired after both exist");
+    Check(a.Order < b.Order, "Initialize runs in registration order");
+
+    bool threw = false;
+    try { services.Get<string>(); } catch (InvalidOperationException) { threw = true; }
+    Check(threw, "asking for something never registered fails loudly at start-up");
+
+    threw = false;
+    try { services.Register<NeedsA>(null); } catch (ArgumentNullException) { threw = true; }
+    Check(threw, "registering null fails loudly");
+
+    Type[] worldTypes;
+    try { worldTypes = typeof(ArcheCore.Server.World.Managers.PlayerManager).Assembly.GetTypes(); }
+    catch (System.Reflection.ReflectionTypeLoadException ex) { worldTypes = ex.Types.Where(ty => ty != null).ToArray(); }
+    var statics = worldTypes
+        .SelectMany(ty => ty.GetProperties(System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic))
+        .Where(pr => pr.Name == "Current" && pr.PropertyType == pr.DeclaringType)
+        .Select(pr => pr.DeclaringType.Name).ToList();
+    Check(statics.Count == 0, $"no static 'Current' singletons left in the world server ({string.Join(", ", statics)})");
+}
+
+// ═════════════════════════════════════════════════════════════════════
+Console.WriteLine("\nFix-first #3/#5 - session components and the save snapshot");
+{
+    var s = new PlayerSession { AccountId = 1, CharacterId = 9, Level = 4, Position = new Vector3(1, 2, 3) };
+    s.MarkSaved();
+    Check(!s.IsDirty, "freshly loaded session is clean");
+
+    s.Inventory.Gold = 10;
+    Check(s.IsDirty, "gold change -> dirty (InventoryComponent)");
+    s.MarkSaved();
+    s.Inventory.Slots[3] = new InventorySlot { ItemTemplateId = 7, Quantity = 2 };
+    s.Inventory.Dirty = true;
+    Check(s.IsDirty, "bag change -> dirty");
+    s.MarkSaved();
+    s.Quests.Dirty = true;
+    Check(s.IsDirty, "quest change -> dirty (QuestComponent)");
+    s.MarkSaved();
+    s.Combat.Health = 1; s.Mount.MountId = 3; s.Market.TargetId = 5; s.Movement.Violations = 2;
+    Check(!s.IsDirty, "health, mount, market and movement state are not saved - not dirty");
+
+    s.Inventory.Dirty = true;
+    var snap = CharacterPersistence.Capture(s);
+    Check(!s.IsDirty, "taking the snapshot marks every component saved");
+    Check(snap.Gold == 10 && snap.Level == 4 && snap.X == 1 && snap.Z == 3, "snapshot carries identity, level, position, gold");
+    Check(snap.Inventory.Length == 1 && snap.Inventory[0].Slot == 3 && snap.Inventory[0].ItemTemplateId == 7 && snap.Inventory[0].Quantity == 2,
+          "snapshot carries the bag (occupied slots only)");
+    Check(snap.Quests == null, "quest log never loaded -> Quests = null (the persistence server leaves the rows alone)");
+
+    s.Quests.Loaded = true;
+    s.Quests.UnknownRows = new[] { new QuestStateDto { QuestId = 99, Status = 1, Progress = "1" } };
+    s.Quests.Progress[2] = new QuestProgress { QuestId = 2, Status = ArcheCore.Network.Shared.Packets.W2C.QuestStatus.Active, Counts = new[] { 3 } };
+    snap = CharacterPersistence.Capture(s);
+    Check(snap.Quests != null && snap.Quests.Length == 2 && snap.Quests.Any(q => q.QuestId == 99) && snap.Quests.Any(q => q.QuestId == 2 && q.Progress == "3"),
+          "loaded quest log is saved whole, rows for removed quests carried along");
+    Check(s.PersistentComponents.Length == 2 && s.PersistentComponents.Contains(s.Inventory) && s.PersistentComponents.Contains(s.Quests),
+          "Inventory and Quests are the saved components");
+}
+
+// ═════════════════════════════════════════════════════════════════════
+Console.WriteLine("\nFix-first #1 - one Effect system (items, skills, NPC swings)");
+{
+    var catalog = new EffectCatalog();
+    catalog.Load(Array.Empty<EffectRow>());
+
+    var potion = catalog.ForItem(new ItemUse { ItemId = 4, EffectType = ItemEffectType.Heal, EffectValue = 50 });
+    Check(potion.Length == 1 && potion[0] == Effect.Heal(50, 50), "no rows: a heal potion falls back to ItemUses (Heal self 50)");
+    var whistle = catalog.ForItem(new ItemUse { ItemId = 11, EffectType = ItemEffectType.Mount, EffectValue = 1 });
+    Check(whistle[0].Kind == EffectKind.Mount && whistle[0].RefId == 1, "horse whistle falls back to Mount #1");
+    Check(catalog.ForItem(new ItemUse { ItemId = 13, EffectType = (ItemEffectType)42 }) == null, "unknown EffectType -> null (use refused)");
+    var strike = catalog.ForSkill(new ArcheCore.Server.World.GameData.Combat.SkillTemplate { Id = 1, MinDamage = 8, MaxDamage = 14 });
+    Check(strike.Length == 1 && strike[0] == Effect.Damage(8, 14), "no rows: a skill falls back to MinDamage..MaxDamage on its target");
+    Check(ReferenceEquals(catalog.ForNpcSwing(2, 4), catalog.ForNpcSwing(2, 4)), "NPC swings are shared per damage range (no allocation per hit)");
+
+    catalog.Load(new[]
+    {
+        new EffectRow { Id = 1, OwnerType = EffectOwner.Skill, OwnerId = 1, Sort = 1, Kind = EffectKind.ApplyStatus, Target = EffectTarget.Target, RefId = 3, DurationMs = 5000 },
+        new EffectRow { Id = 2, OwnerType = EffectOwner.Skill, OwnerId = 1, Sort = 0, Kind = EffectKind.Damage, Target = EffectTarget.Target, Min = 20, Max = 30 },
+        new EffectRow { Id = 3, OwnerType = EffectOwner.Item,  OwnerId = 4, Kind = EffectKind.Heal, Min = 10, Max = 5 },       // bad: Max < Min
+        new EffectRow { Id = 4, OwnerType = EffectOwner.Item,  OwnerId = 4, Kind = (EffectKind)77 },                          // bad: unknown kind
+    });
+    strike = catalog.ForSkill(new ArcheCore.Server.World.GameData.Combat.SkillTemplate { Id = 1, MinDamage = 8, MaxDamage = 14 });
+    Check(strike.Length == 2 && strike[0].Kind == EffectKind.Damage && strike[0].Min == 20 && strike[1].Kind == EffectKind.ApplyStatus,
+          "rows win over the old columns, run in Sort order");
+    Check(!catalog.HasRows(EffectOwner.Item, 4) && catalog.ForItem(new ItemUse { ItemId = 4, EffectType = ItemEffectType.Heal, EffectValue = 50 })[0].Min == 50,
+          "invalid rows are skipped at load (the item keeps its fallback)");
+
+    var applier = new EffectApplier(new Random(7));
+    var wolf = new ArcheCore.Server.World.Core.Entities.NpcEntity { NetworkId = 1_000_001, Name = "Wolf", MaxHealth = 100, Health = 100 };
+    var ctx = new EffectContext(EffectActor.None, EffectActor.Of(wolf), "test");
+
+    int lo = int.MaxValue, hi = 0;
+    for (int i = 0; i < 400; i++)
+    {
+        wolf.Health = 100;
+        applier.TryApply(new[] { Effect.Damage(8, 14) }, ctx, out var r, out _);
+        lo = Math.Min(lo, r.Damage); hi = Math.Max(hi, r.Damage);
+    }
+    Check(lo == 8 && hi == 14, $"damage rolls cover MinDamage..MaxDamage inclusive, like the old Rng.Next(min, max+1) ({lo}-{hi})");
+
+    wolf.Health = 5;
+    Check(applier.TryApply(new[] { Effect.Damage(20, 20) }, ctx, out var kill, out _) && kill.Damage == 5 && kill.TargetKilled && wolf.Health == 0,
+          "overkill clamps at 0: reports the 5 actually dealt, and the kill");
+    Check(!applier.Check(new[] { Effect.Damage(1, 1) }, ctx, out var why) && why == "No valid target.", "can't hit a dead target");
+
+    wolf.Health = 30;
+    applier.TryApply(new[] { Effect.Damage(20, 20), Effect.Damage(20, 20), Effect.Damage(20, 20) }, ctx, out var multi, out _);
+    Check(multi.Damage == 30 && multi.TargetKilled, "several effects run in order; once it's dead the rest do nothing");
+
+    var vendor = new ArcheCore.Server.World.Core.Entities.NpcEntity { NetworkId = 1_000_002, Name = "Vendor", MaxHealth = 0 };
+    Check(!applier.Check(new[] { Effect.Damage(1, 1) }, new EffectContext(EffectActor.None, EffectActor.Of(vendor), "test"), out _),
+          "an NPC with no health (vendor, pet) can't be damaged");
+
+    var healer = new ArcheCore.Server.World.Core.Entities.NpcEntity { NetworkId = 1_000_003, Name = "Healer", MaxHealth = 100, Health = 100 };
+    var self = new EffectContext(EffectActor.Of(healer), EffectActor.None, "test");
+    Check(!applier.Check(new[] { Effect.Heal(50, 50) }, self, out why) && why == "You are already at full health.",
+          "a heal at full health is refused with the potion's old message (so it isn't consumed)");
+    healer.Health = 80;
+    Check(applier.TryApply(new[] { Effect.Heal(50, 50) }, self, out var healed, out _) && healed.Healed == 20 && healer.Health == 100,
+          "heal clamps at max and reports what was restored");
+
+    Check(!applier.Check(new[] { new Effect(EffectKind.Mount, EffectTarget.Self, RefId: 1) }, self, out _),
+          "Mount on something that isn't a player is refused");
+    var player = new PlayerSession { NetworkId = 5, Name = "P" };
+    player.Combat.MaxHealth = 100; player.Combat.Health = 40;
+    applier.TryApply(new[] { Effect.Damage(15, 15) },
+        new EffectContext(EffectActor.Of(healer), EffectActor.Of(null, player), "test"), out var onPlayer, out _);
+    Check(onPlayer.Damage == 15 && player.Combat.Health == 25, "players and NPCs take damage through the same code");
+}
+
+// ═════════════════════════════════════════════════════════════════════
+Console.WriteLine("\nFix-first #1 - AddEffects migration + patch 036 on the real worldserver.db");
+{
+    string source = Environment.GetEnvironmentVariable("ARCHECORE_WORLD_DB");
+    if (string.IsNullOrEmpty(source))
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null && source == null; dir = dir.Parent)
+        {
+            var candidate = Path.Combine(dir.FullName, "ArcheCore.Server.World", "Data", "worldserver.db");
+            if (File.Exists(candidate)) source = candidate;
+        }
+    }
+
+    string patches = source == null ? null : Path.GetFullPath(Path.Combine(Path.GetDirectoryName(source), "..", "SQL", "patches"));
+    if (Environment.GetEnvironmentVariable("ARCHECORE_PATCH_DIR") is { Length: > 0 } pd) patches = pd;
+
+    if (source == null || !Directory.Exists(patches))
+    {
+        Console.WriteLine("  SKIP no worldserver.db found (set ARCHECORE_WORLD_DB and ARCHECORE_PATCH_DIR)");
+    }
+    else
+    {
+        string copy = Path.Combine(Path.GetTempPath(), $"worldserver-test-{Guid.NewGuid():N}.db");
+        File.Copy(source, copy);
+        try
+        {
+            var options = new DbContextOptionsBuilder<WorldDataDbContext>().UseSqlite($"Data Source={copy}").Options;
+            string migrateError = null;
+            await using (var wdb = new WorldDataDbContext(options))
+            {
+                try { await wdb.Database.MigrateAsync(); }
+                catch (Exception ex) { migrateError = ex.Message; }
+            }
+            Check(migrateError == null, $"migrations apply, and the model matches the snapshot{(migrateError == null ? "" : ": " + migrateError)}");
+
+            var runner = new GameDataPatchRunner(Microsoft.Extensions.Options.Options.Create(
+                new DatabaseConfig { WorldDb = copy, PatchDirectory = patches }));
+            await runner.RunAsync();
+
+            await using (var wdb = new WorldDataDbContext(options))
+            {
+                var rows = wdb.Effects.AsNoTracking().ToList();
+                bool Has(EffectOwner o, int id, EffectKind k, int min, int max, int refId, EffectTarget tg) =>
+                    rows.Any(r => r.OwnerType == o && r.OwnerId == id && r.Kind == k && r.Min == min && r.Max == max && r.RefId == refId && r.Target == tg);
+
+                var uses = wdb.ItemUses.AsNoTracking().ToList();
+                var skills = wdb.Skills.AsNoTracking().ToList();
+                bool itemsOk = uses.All(u => u.EffectType switch
+                {
+                    ItemEffectType.Heal => Has(EffectOwner.Item, u.ItemId, EffectKind.Heal, u.EffectValue, u.EffectValue, 0, EffectTarget.Self),
+                    _ => Has(EffectOwner.Item, u.ItemId, (EffectKind)(int)u.EffectType, 0, 0, u.EffectType == ItemEffectType.ScriptOnly ? 0 : u.EffectValue, EffectTarget.Self)
+                });
+                bool skillsOk = skills.All(sk => Has(EffectOwner.Skill, sk.Id, EffectKind.Damage, sk.MinDamage, sk.MaxDamage, 0, EffectTarget.Target));
+
+                Check(itemsOk, $"every ItemUses row became one Effects row ({uses.Count} items)");
+                Check(skillsOk, $"every skill became a Damage row ({string.Join(", ", skills.Select(sk => $"{sk.Name} {sk.MinDamage}-{sk.MaxDamage}"))})");
+                Check(rows.Count == uses.Count + skills.Count, $"nothing else was written ({rows.Count} rows)");
+
+                var loaded = new EffectCatalog();
+                loaded.Load(rows);
+                bool same = uses.All(u =>
+                {
+                    var fromRows = loaded.ForItem(u);
+                    var fallback = new EffectCatalog(); fallback.Load(Array.Empty<EffectRow>());
+                    return loaded.HasRows(EffectOwner.Item, u.ItemId) && fromRows.SequenceEqual(fallback.ForItem(u));
+                }) && skills.All(sk =>
+                {
+                    var fallback = new EffectCatalog(); fallback.Load(Array.Empty<EffectRow>());
+                    return loaded.ForSkill(sk).SequenceEqual(fallback.ForSkill(sk));
+                });
+                Check(same, "the converted rows do exactly what the old columns did - gameplay unchanged");
+            }
+
+            await runner.RunAsync();
+            await using (var wdb = new WorldDataDbContext(options))
+                Check(wdb.Effects.Count() == wdb.ItemUses.Count() + wdb.Skills.Count(), "starting again doesn't apply 036 twice");
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            File.Delete(copy);
+        }
+    }
+}
+
 tickCts.Cancel();
 StopServer();
 Console.WriteLine($"\n{passed} passed, {failed} failed");
 return failed == 0 ? 0 : 1;
+
+// Two managers that need each other - the case two-phase start-up exists for.
+class NeedsB : ArcheCore.Server.World.Core.Services.IInitializable
+{
+    public static int Counter;
+    public NeedsA B; public int Order;
+    public void Initialize(ArcheCore.Server.World.Core.Services.ServiceContainer services) { B = services.Get<NeedsA>(); Order = ++Counter; }
+}
+
+class NeedsA : ArcheCore.Server.World.Core.Services.IInitializable
+{
+    public NeedsB A; public int Order;
+    public void Initialize(ArcheCore.Server.World.Core.Services.ServiceContainer services) { A = services.Get<NeedsB>(); Order = ++NeedsB.Counter; }
+}

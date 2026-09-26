@@ -4,26 +4,31 @@ using System.Collections.Generic;
 namespace ArcheCore.Server.World.Core.Services
 {
     /// <summary>
-    /// Not a general-purpose DI container - just enough to build packet
-    /// handlers by reflection with zero chance of two different instances
-    /// of the same type existing. That guarantee is what permanently fixes
-    /// the class of bug where a handler was accidentally constructed with
-    /// its own private/empty manager instance instead of the shared one
-    /// (e.g. a second, empty InterestManager instead of the real one).
+    /// Every long-lived singleton the world server owns, registered once by
+    /// WorldServer. Two jobs:
     ///
-    /// Every long-lived singleton the world server owns (PlayerManager,
-    /// InterestManager, ReplicationManager, etc.) is registered here once
-    /// in WorldServer.RegisterPackets, and PacketDispatcher.AutoRegister
-    /// resolves handler constructor parameters from this same table - so
-    /// there is exactly one place any dependency can come from.
+    ///   - Packet handlers are built by reflection from it
+    ///     (PacketDispatcher.AutoRegister), so a handler can never be handed
+    ///     a second, empty copy of a manager.
+    ///   - Managers find each other through it in IInitializable.Initialize
+    ///     (two-phase start-up), instead of through static Current handles.
+    ///
+    /// Not a general DI container: one instance per type, registered by hand.
     /// </summary>
     public class ServiceContainer
     {
         private readonly Dictionary<Type, object> _services = new();
+        private readonly List<object> _inOrder = new();
 
         public void Register<T>(T instance)
         {
+            if (instance == null)
+                throw new ArgumentNullException(nameof(instance), $"[ServiceContainer] Registering a null {typeof(T).Name}.");
+
             _services[typeof(T)] = instance;
+
+            if (!_inOrder.Contains(instance))
+                _inOrder.Add(instance);
         }
 
         public object Resolve(Type type)
@@ -33,7 +38,32 @@ namespace ArcheCore.Server.World.Core.Services
 
             throw new InvalidOperationException(
                 $"[ServiceContainer] No instance registered for {type.Name}. " +
-                "Add a services.Register(...) call for it in WorldServer.RegisterPackets.");
+                "Add a services.Register(...) call for it in WorldServer.");
+        }
+
+        public T Get<T>() => (T)Resolve(typeof(T));
+
+        public bool TryGet<T>(out T instance)
+        {
+            if (_services.TryGetValue(typeof(T), out var o))
+            {
+                instance = (T)o;
+                return true;
+            }
+
+            instance = default;
+            return false;
+        }
+
+        /// <summary>
+        /// Phase 2 of start-up: Initialize every registered IInitializable,
+        /// in registration order, each exactly once.
+        /// </summary>
+        public void InitializeAll()
+        {
+            foreach (var instance in _inOrder)
+                if (instance is IInitializable initializable)
+                    initializable.Initialize(this);
         }
     }
 }

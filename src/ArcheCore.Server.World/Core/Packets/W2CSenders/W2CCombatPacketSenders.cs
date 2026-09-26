@@ -68,7 +68,7 @@ namespace ArcheCore.Server.World.Networking.W2C
 
     public static class W2CSpawnCorpsePacketSender
     {
-        public static void Send(ReplicationManager replication, NetPeer peer, CorpseEntity corpse)
+        public static void Send(ReplicationManager replication, NetPeer peer, CorpseEntity corpse, InteractionActionData[] actions)
         {
             replication.Send(
                 Opcodes.W2CSpawnCorpse,
@@ -83,7 +83,7 @@ namespace ArcheCore.Server.World.Networking.W2C
                     InteractRange = corpse.InteractRange,
                     OwnerId       = corpse.OwnerId,
                     OwnerName     = corpse.OwnerName,
-                    Actions       = InteractionActionCatalog.ActionsFor(InteractableKind.Lootable, corpse.TemplateId)
+                    Actions       = actions
                 },
                 peer);
         }

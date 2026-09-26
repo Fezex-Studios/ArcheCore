@@ -56,7 +56,7 @@ namespace ArcheCore.Server.World.Managers
     ///
     /// Because purchases are mailed, a full bag can never stop or lose one.
     /// </summary>
-    public class AuctionManager
+    public class AuctionManager : ArcheCore.Server.World.Core.Services.IInitializable
     {
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
@@ -89,7 +89,12 @@ namespace ArcheCore.Server.World.Managers
         private readonly ItemManager _items;
         private readonly Action<Action> _enqueueOnTickThread;
 
-        private DateTime _nextSweep = DateTime.MinValue;
+        /// <summary>
+        /// Two-phase start-up: the expiry sweep is a repeating Scheduler
+        /// callback, about once a minute.
+        /// </summary>
+        public void Initialize(ArcheCore.Server.World.Core.Services.ServiceContainer services) =>
+            services.Get<Scheduler>().Every(60_000, () => _ = SweepExpiredAsync(), "auction expiry sweep");
 
         public AuctionManager(AuctionClient auction, PersistenceClient persistence, PlayerManager players,
                               ItemManager items, Action<Action> enqueueOnTickThread)
@@ -160,9 +165,9 @@ namespace ArcheCore.Server.World.Managers
             int count = quantity <= 0 || quantity > contents.Quantity ? contents.Quantity : quantity;
             int deposit = Math.Max(1, price * DepositPercent / 100);
 
-            if (session.Gold < deposit)
+            if (session.Inventory.Gold < deposit)
             {
-                Fail(peer, $"The deposit is {deposit}g and you have {session.Gold}g.");
+                Fail(peer, $"The deposit is {deposit}g and you have {session.Inventory.Gold}g.");
                 return;
             }
 
@@ -277,10 +282,10 @@ namespace ArcheCore.Server.World.Managers
             {
                 saved = await OnTickThreadAsync<Task<SaveOutcome>>(() =>
                 {
-                    if (session.Gold < listing.Price)
+                    if (session.Inventory.Gold < listing.Price)
                     {
                         W2CMarketResultPacketSender.Send(peer, false,
-                            $"That costs {listing.Price}g and you have {session.Gold}g.", refresh: 1);
+                            $"That costs {listing.Price}g and you have {session.Inventory.Gold}g.", refresh: 1);
                         return null;
                     }
 
@@ -454,21 +459,6 @@ namespace ArcheCore.Server.World.Managers
         }
 
         // ── Expiry ───────────────────────────────────────────────────
-
-        /// <summary>
-        /// From the tick loop, about once a minute. The service deletes the
-        /// listing and queues it home by mail in one transaction, so this
-        /// only has to ask. Anything that doesn't sell comes back to its
-        /// seller in their mailbox.
-        /// </summary>
-        public void Tick()
-        {
-            if (DateTime.UtcNow < _nextSweep)
-                return;
-
-            _nextSweep = DateTime.UtcNow.AddMinutes(1);
-            _ = SweepExpiredAsync();
-        }
 
         private async Task SweepExpiredAsync()
         {

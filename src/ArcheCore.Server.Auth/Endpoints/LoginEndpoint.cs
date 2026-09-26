@@ -142,7 +142,7 @@ public static class LoginEndpoint
             }
 
             var token     = TokenService.CreateToken();
-            var expiresAt = now.AddHours(config.SessionLifetimeHours);
+            var expiresAt = now.AddSeconds(config.LaunchTokenSeconds);   // L3: minutes, not a day
 
             // MySQL's REPLACE INTO is the equivalent of the SQLite
             // INSERT OR REPLACE the original used, and it's here for the
@@ -164,7 +164,16 @@ public static class LoginEndpoint
             log.LogInformation("Login OK for '{Username}' (id {AccountId})",
                 username, account.AccountId);
 
-            return Results.Ok(new LoginResponse { Success = true, Token = token });
+            // L2: what the launcher keeps from now on instead of the password.
+            var refresh = await RefreshTokens.IssueAsync(db, account.AccountId, config, now);
+
+            return Results.Ok(new LoginResponse
+            {
+                Success      = true,
+                Token        = token,
+                RefreshToken = refresh,
+                Username     = account.Username
+            });
         })
         .RequireRateLimiting("auth-strict");
     }

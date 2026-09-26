@@ -1,4 +1,5 @@
 using System;
+using ArcheCore.Server.World.Core.Interaction;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
@@ -40,8 +41,19 @@ namespace ArcheCore.Server.World.Managers
     /// corpse, or one past its lifetime, disappears - which also closes the
     /// window on the client (it listens for the despawn).
     /// </summary>
-    public class LootManager : IWorldEntitySource
+    public class LootManager : IWorldEntitySource, ArcheCore.Server.World.Core.Services.IInitializable
     {
+        private Scheduler _scheduler;
+
+        /// <summary>Two-phase start-up: corpse expiry runs on the shared Scheduler.</summary>
+        public void Initialize(ArcheCore.Server.World.Core.Services.ServiceContainer services)
+        {
+            _scheduler = services.Get<Scheduler>();
+            _actions = services.Get<InteractionActionCatalog>();
+        }
+
+        private InteractionActionCatalog _actions;
+
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
         private static readonly Random Rng = new();
 
@@ -139,7 +151,7 @@ namespace ArcheCore.Server.World.Managers
             if (!_corpses.TryGetValue(networkId, out var corpse))
                 return false;
 
-            W2CSpawnCorpsePacketSender.Send(_replication, peer, corpse);
+            W2CSpawnCorpsePacketSender.Send(_replication, peer, corpse, _actions.For(InteractableKind.Lootable, corpse.TemplateId));
             return true;
         }
 
@@ -185,6 +197,13 @@ namespace ArcheCore.Server.World.Managers
             _corpses[corpse.NetworkId] = corpse;
             _interactions.Register(corpse.NetworkId, corpse);
 
+            // Expiry is one Scheduler callback, cancelled if it's looted empty first.
+            corpse.Expiry = _scheduler.In(CorpseLifetime, () =>
+            {
+                if (_corpses.TryGetValue(corpse.NetworkId, out var still) && ReferenceEquals(still, corpse))
+                    Despawn(corpse);
+            }, "corpse expiry");
+
             // Into the grid, and in front of everyone already nearby - a new
             // entry's "entered" list is exactly the players who can see it.
             var (entered, _) = _interest.UpdatePosition(corpse.NetworkId, corpse.Position);
@@ -192,7 +211,7 @@ namespace ArcheCore.Server.World.Managers
             {
                 if (SpawnManager.IsNpcId(id)) continue;
                 if (_players.TryGetPeer(id, out var peer))
-                    W2CSpawnCorpsePacketSender.Send(_replication, peer, corpse);
+                    W2CSpawnCorpsePacketSender.Send(_replication, peer, corpse, _actions.For(InteractableKind.Lootable, corpse.TemplateId));
             }
         }
 
@@ -345,26 +364,10 @@ namespace ArcheCore.Server.World.Managers
 
         // ── Lifetime ─────────────────────────────────────────────────
 
-        /// <summary>Once per tick, from WorldServer's tick loop only.</summary>
-        public void Tick()
-        {
-            if (_corpses.Count == 0)
-                return;
-
-            long now = ArcheCore.Server.World.ServerClock.NowMs;
-            _expiredScratch.Clear();
-
-            foreach (var corpse in _corpses.Values)
-                if (now >= corpse.ExpiresAtMs)
-                    _expiredScratch.Add(corpse.NetworkId);
-
-            foreach (int id in _expiredScratch)
-                if (_corpses.TryGetValue(id, out var corpse))
-                    Despawn(corpse);
-        }
-
         private void Despawn(CorpseEntity corpse)
         {
+            _scheduler.Cancel(corpse.Expiry);
+
             _peerScratch.Clear();
             foreach (int id in _interest.GetKnownBy(corpse.NetworkId))
             {

@@ -32,6 +32,21 @@ public sealed class FailedLogin
     public DateTime? LockedUntil { get; set; }
 }
 
+/// <summary>
+/// One row of `refresh_tokens` (launcher L2). What "Remember me" and a
+/// logged-in launcher hold INSTEAD of the password: a long-lived, revocable
+/// credential that can only be traded for one-shot launch tokens
+/// (/session/launch-token). Only the SHA-256 of the token is stored, so a
+/// copy of this table can't be used to log in.
+/// </summary>
+public sealed class RefreshToken
+{
+    public string   TokenHash { get; set; } = string.Empty;
+    public int      AccountId { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime ExpiresAt { get; set; }
+}
+
 public sealed class AuthDbContext : DbContext
 {
     public AuthDbContext(DbContextOptions<AuthDbContext> options) : base(options) { }
@@ -39,6 +54,7 @@ public sealed class AuthDbContext : DbContext
     public DbSet<Account>     Accounts     => Set<Account>();
     public DbSet<Session>     Sessions     => Set<Session>();
     public DbSet<FailedLogin> FailedLogins => Set<FailedLogin>();
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -139,6 +155,38 @@ public sealed class AuthDbContext : DbContext
             e.Property(f => f.LockedUntil)
                 .HasColumnName("locked_until")
                 .HasColumnType("datetime(6)");
+        });
+
+        b.Entity<RefreshToken>(e =>
+        {
+            e.ToTable("refresh_tokens");
+            e.HasKey(r => r.TokenHash);
+
+            // Hex SHA-256 = 64 chars.
+            e.Property(r => r.TokenHash)
+                .HasColumnName("token_hash")
+                .HasMaxLength(64);
+
+            e.Property(r => r.AccountId)
+                .HasColumnName("account_id")
+                .IsRequired();
+
+            e.Property(r => r.CreatedAt)
+                .HasColumnName("created_at")
+                .HasColumnType("datetime(6)")
+                .IsRequired();
+
+            e.Property(r => r.ExpiresAt)
+                .HasColumnName("expires_at")
+                .HasColumnType("datetime(6)")
+                .IsRequired();
+
+            // Several per account (one per launcher / machine), unlike sessions.
+            e.HasIndex(r => r.AccountId)
+                .HasDatabaseName("ix_refresh_tokens_account_id");
+
+            e.HasIndex(r => r.ExpiresAt)
+                .HasDatabaseName("ix_refresh_tokens_expires_at");
         });
     }
 }

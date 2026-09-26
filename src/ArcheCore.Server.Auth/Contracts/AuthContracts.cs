@@ -18,8 +18,29 @@ public sealed class LoginRequest
 public sealed class LoginResponse
 {
     public bool    Success { get; set; }
+
+    /// <summary>One-shot launch token, valid for Auth:LaunchTokenSeconds.</summary>
     public string? Token   { get; set; }
+
+    /// <summary>
+    /// Long-lived credential the launcher keeps instead of the password and
+    /// trades for launch tokens at /session/launch-token. Single use: each
+    /// trade returns a replacement.
+    /// </summary>
+    public string? RefreshToken { get; set; }
+
+    public string? Username { get; set; }
     public string? Message { get; set; }
+}
+
+public sealed class RefreshRequest
+{
+    public string? RefreshToken { get; set; }
+}
+
+public sealed class LogoutResponse
+{
+    public bool Success { get; set; }
 }
 
 public sealed class RegisterRequest

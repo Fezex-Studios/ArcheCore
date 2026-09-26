@@ -1,4 +1,5 @@
 using ArcheCore.Server.World.GameData.Combat;
+using ArcheCore.Server.World.GameData.Effects;
 using ArcheCore.Server.World.GameData.Harvest;
 using ArcheCore.Server.World.GameData.Interaction;
 using ArcheCore.Server.World.GameData.Items;
@@ -48,4 +49,7 @@ public class WorldDataDbContext : DbContext
 
     // Mounts (roadmap N)
     public DbSet<MountTable> Mounts => Set<MountTable>();
+
+    // Effects of items and skills (roadmap fix-first #1)
+    public DbSet<EffectRow> Effects => Set<EffectRow>();
 }

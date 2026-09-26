@@ -71,19 +71,6 @@ namespace ArcheCore.Server.World.Managers
         /// </summary>
         public static W2PCharacterSaveFullRequest Capture(PlayerSession session, long claimMailId = 0)
         {
-            var inventory = new List<InventorySlotDto>(InventoryConstants.SlotCount);
-
-            for (int i = 0; i < session.Inventory.Length; i++)
-            {
-                var slot = session.Inventory[i];
-                if (slot.ItemTemplateId > 0 && slot.Quantity > 0)
-                    inventory.Add(new InventorySlotDto { Slot = i, ItemTemplateId = slot.ItemTemplateId, Quantity = slot.Quantity });
-            }
-
-            // No QuestManager (a test, or quests disabled) = leave the
-            // quest rows alone rather than wipe them.
-            QuestStateDto[] quests = QuestManager.Current?.BuildSaveSet(session);
-
             var request = new W2PCharacterSaveFullRequest
             {
                 AccountId   = session.AccountId,
@@ -92,16 +79,15 @@ namespace ArcheCore.Server.World.Managers
                 X           = session.Position.X,
                 Y           = session.Position.Y,
                 Z           = session.Position.Z,
-                Gold        = session.Gold,
-                Inventory   = inventory.ToArray(),
-                Quests      = quests,
                 ClaimMailId = claimMailId
             };
 
-            session.MarkSaved();
-            if (quests != null)
-                session.QuestsDirty = false;
+            // Gold + bag, quest log, and whatever gets added later: each
+            // saved component writes its own part (IPersistentComponent).
+            foreach (var component in session.PersistentComponents)
+                component.WriteTo(request);
 
+            session.MarkSaved();
             return request;
         }
 

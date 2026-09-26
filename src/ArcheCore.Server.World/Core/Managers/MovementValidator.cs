@@ -225,10 +225,10 @@ namespace ArcheCore.Server.World.Managers
         /// </summary>
         public void NotifyAuthoritativeMove(PlayerSession session, Vector3 position)
         {
-            session.LastValidPosition = position;
-            session.MoveBaselineSet = true;
-            session.LastMoveTime = Now;
-            session.MovementViolations = 0;
+            session.Movement.LastValidPosition = position;
+            session.Movement.BaselineSet = true;
+            session.Movement.LastMoveTime = Now;
+            session.Movement.Violations = 0;
 
             // Seeded FULL, not empty. A character that has just been placed
             // by the server is the most likely thing in the game to move
@@ -237,9 +237,9 @@ namespace ArcheCore.Server.World.Managers
             // starting it with no allowance means punishing it for the
             // server's own placement. The bank is capped anyway, so a full
             // start is worth at most BurstSeconds of movement.
-            session.HorizontalBudget = MaxHorizontalSpeed * BurstSeconds;
-            session.UpBudget = MaxUpwardSpeed * BurstSeconds;
-            session.DownBudget = MaxDownwardSpeed * BurstSeconds;
+            session.Movement.HorizontalBudget = MaxHorizontalSpeed * BurstSeconds;
+            session.Movement.UpBudget = MaxUpwardSpeed * BurstSeconds;
+            session.Movement.DownBudget = MaxDownwardSpeed * BurstSeconds;
         }
 
         public Result Validate(NetPeer peer, PlayerSession session, Vector3 position, Vector3 velocity)
@@ -263,18 +263,18 @@ namespace ArcheCore.Server.World.Managers
             // the client's claim - the spawn position is authoritative and
             // taking the client's first packet as gospel would let it
             // choose where it starts.
-            if (!session.MoveBaselineSet)
+            if (!session.Movement.BaselineSet)
             {
                 NotifyAuthoritativeMove(session, session.Position);
-                session.LastValidPosition = session.Position;
+                session.Movement.LastValidPosition = session.Position;
             }
 
-            var elapsed = now - session.LastMoveTime;
+            var elapsed = now - session.Movement.LastMoveTime;
 
             if (elapsed < MinPacketInterval)
                 return Result.Ignored;
 
-            var delta = position - session.LastValidPosition;
+            var delta = position - session.Movement.LastValidPosition;
 
             if (delta.Length() > MaxSingleStep)
                 return Reject(peer, session, $"single step of {delta.Length():F1} units");
@@ -306,23 +306,23 @@ namespace ArcheCore.Server.World.Managers
             // A mounted player is allowed to be faster - by exactly the
             // mount's multiplier and no more, so the mount widens the
             // allowance rather than switching the check off.
-            float horizontalCap = MaxHorizontalSpeed * (session.SpeedMultiplier > 0f ? session.SpeedMultiplier : 1f);
+            float horizontalCap = MaxHorizontalSpeed * (session.Mount.SpeedMultiplier > 0f ? session.Mount.SpeedMultiplier : 1f);
 
-            Refill(ref session.HorizontalBudget, dt, horizontalCap);
-            Refill(ref session.UpBudget,         dt, MaxUpwardSpeed);
-            Refill(ref session.DownBudget,       dt, MaxDownwardSpeed);
+            Refill(ref session.Movement.HorizontalBudget, dt, horizontalCap);
+            Refill(ref session.Movement.UpBudget,         dt, MaxUpwardSpeed);
+            Refill(ref session.Movement.DownBudget,       dt, MaxDownwardSpeed);
 
-            if (!TrySpend(ref session.HorizontalBudget, horizontal))
+            if (!TrySpend(ref session.Movement.HorizontalBudget, horizontal))
                 return Reject(peer, session, $"horizontal speed ({horizontal / dt:F1} u/s sustained)");
 
             if (vertical > 0f)
             {
-                if (!TrySpend(ref session.UpBudget, vertical))
+                if (!TrySpend(ref session.Movement.UpBudget, vertical))
                     return Reject(peer, session, $"upward speed ({vertical / dt:F1} u/s sustained)");
             }
             else if (vertical < 0f)
             {
-                if (!TrySpend(ref session.DownBudget, -vertical))
+                if (!TrySpend(ref session.Movement.DownBudget, -vertical))
                     return Reject(peer, session, $"downward speed ({-vertical / dt:F1} u/s sustained)");
             }
 
@@ -337,14 +337,14 @@ namespace ArcheCore.Server.World.Managers
             if (!ValidateAgainstTerrain(position, out string terrainReason))
                 return Reject(peer, session, terrainReason);
 
-            session.LastValidPosition = position;
-            session.LastMoveTime = now;
+            session.Movement.LastValidPosition = position;
+            session.Movement.LastMoveTime = now;
 
             // Decay rather than clear. A client that violates every third
             // packet is still cheating; resetting to zero on each good one
             // would let it stay permanently one under the threshold.
-            if (session.MovementViolations > 0)
-                session.MovementViolations--;
+            if (session.Movement.Violations > 0)
+                session.Movement.Violations--;
 
             return Result.Accepted;
         }
@@ -375,33 +375,33 @@ namespace ArcheCore.Server.World.Managers
 
         private Result Reject(NetPeer peer, PlayerSession session, string reason)
         {
-            session.MovementViolations++;
+            session.Movement.Violations++;
 
-            if (session.MovementViolations < ViolationsBeforeCorrection)
+            if (session.Movement.Violations < ViolationsBeforeCorrection)
                 return Result.Rejected;
 
             var now = Now;
-            if (now - session.LastCorrectionTime < CorrectionCooldownSeconds)
+            if (now - session.Movement.LastCorrectionTime < CorrectionCooldownSeconds)
                 return Result.Rejected;
 
-            session.LastCorrectionTime = now;
-            session.MovementViolations = 0;
+            session.Movement.LastCorrectionTime = now;
+            session.Movement.Violations = 0;
 
             // Reset the bank along with the position. Leaving it drained
             // means the client's first legitimate step after a correction
             // is itself a violation, which produces a correction loop that
             // looks exactly like a much worse bug than whatever caused the
             // first one.
-            session.HorizontalBudget = MaxHorizontalSpeed * BurstSeconds;
-            session.UpBudget = MaxUpwardSpeed * BurstSeconds;
-            session.DownBudget = MaxDownwardSpeed * BurstSeconds;
-            session.LastMoveTime = now;
+            session.Movement.HorizontalBudget = MaxHorizontalSpeed * BurstSeconds;
+            session.Movement.UpBudget = MaxUpwardSpeed * BurstSeconds;
+            session.Movement.DownBudget = MaxDownwardSpeed * BurstSeconds;
+            session.Movement.LastMoveTime = now;
 
             Logger.Warn(
                 "[MovementValidator] Correcting {Name} (net {Id}) to {Pos} - {Reason}",
-                session.Name, session.NetworkId, session.LastValidPosition, reason);
+                session.Name, session.NetworkId, session.Movement.LastValidPosition, reason);
 
-            W2CPositionCorrectionPacketSender.Send(_replication, peer, session.LastValidPosition);
+            W2CPositionCorrectionPacketSender.Send(_replication, peer, session.Movement.LastValidPosition);
 
             return Result.Rejected;
         }

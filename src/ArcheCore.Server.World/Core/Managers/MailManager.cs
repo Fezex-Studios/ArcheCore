@@ -154,15 +154,15 @@ namespace ArcheCore.Server.World.Managers
             var (result, save) = await OnTickThreadAsync<(ClaimResult, Task<SaveOutcome>)>(() =>
             {
                 // Left, or this very mail is already being claimed (a double click).
-                if (peer.Tag != session || session.NetworkId == null || !session.ClaimingMail.Add(mail.Id))
+                if (peer.Tag != session || session.NetworkId == null || !session.Market.ClaimingMail.Add(mail.Id))
                     return (ClaimResult.NotClaimed, null);
 
-                bool fits = (long)session.Gold + Math.Max(0, mail.Gold) <= int.MaxValue &&
+                bool fits = (long)session.Inventory.Gold + Math.Max(0, mail.Gold) <= int.MaxValue &&
                             (!hasItem || _players.CanAddItem(peer, mail.ItemTemplateId, mail.ItemQuantity));
 
                 if (!fits)
                 {
-                    session.ClaimingMail.Remove(mail.Id);
+                    session.Market.ClaimingMail.Remove(mail.Id);
                     return (ClaimResult.DidntFit, null);
                 }
 
@@ -185,7 +185,7 @@ namespace ArcheCore.Server.World.Managers
 
             await OnTickThreadAsync(() =>
             {
-                session.ClaimingMail.Remove(mail.Id);
+                session.Market.ClaimingMail.Remove(mail.Id);
 
                 if (outcome == SaveOutcome.Saved)
                 {
@@ -223,21 +223,21 @@ namespace ArcheCore.Server.World.Managers
         {
             bool online = peer.Tag == session && session.NetworkId != null;
 
-            int gold = Math.Min(Math.Max(0, mail.Gold), session.Gold);
+            int gold = Math.Min(Math.Max(0, mail.Gold), session.Inventory.Gold);
             if (gold > 0)
             {
                 if (online) _players.TryAddGold(peer, -gold);
-                else session.Gold -= gold;
+                else session.Inventory.Gold -= gold;
             }
 
             int toRemove = mail.ItemTemplateId != 0 ? Math.Max(0, mail.ItemQuantity) : 0;
 
-            for (int i = 0; i < session.Inventory.Length && toRemove > 0; i++)
+            for (int i = 0; i < session.Inventory.Slots.Length && toRemove > 0; i++)
             {
-                if (session.Inventory[i].ItemTemplateId != mail.ItemTemplateId)
+                if (session.Inventory.Slots[i].ItemTemplateId != mail.ItemTemplateId)
                     continue;
 
-                int take = Math.Min(toRemove, session.Inventory[i].Quantity);
+                int take = Math.Min(toRemove, session.Inventory.Slots[i].Quantity);
 
                 if (online)
                 {
@@ -246,10 +246,10 @@ namespace ArcheCore.Server.World.Managers
                 }
                 else
                 {
-                    session.Inventory[i].Quantity -= take;
-                    if (session.Inventory[i].Quantity <= 0)
-                        session.Inventory[i] = default;
-                    session.InventoryDirty = true;
+                    session.Inventory.Slots[i].Quantity -= take;
+                    if (session.Inventory.Slots[i].Quantity <= 0)
+                        session.Inventory.Slots[i] = default;
+                    session.Inventory.Dirty = true;
                     toRemove -= take;
                 }
             }

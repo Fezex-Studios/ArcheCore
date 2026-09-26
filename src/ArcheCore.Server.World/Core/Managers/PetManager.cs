@@ -25,13 +25,6 @@ namespace ArcheCore.Server.World.Managers
     {
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
-        /// <summary>
-        /// Set when WorldServer builds it. PlayerSpawnManager needs to
-        /// dismiss a pet on disconnect and is built first; same handle
-        /// pattern as QuestManager.Current.
-        /// </summary>
-        public static PetManager Current { get; private set; }
-
         private readonly PlayerManager _players;
         private readonly SpawnManager _spawnManager;
         private readonly NpcAiManager _npcAi;
@@ -43,21 +36,19 @@ namespace ArcheCore.Server.World.Managers
             _spawnManager = spawnManager;
             _npcAi = npcAi;
             _interest = interest;
-
-            Current = this;
         }
 
         /// <summary>Using a pet item: summon it, or dismiss the one that's out.</summary>
         public bool Toggle(NetPeer peer, PlayerSession session, int npcTemplateId)
         {
-            if (session.PetNetworkId != 0)
+            if (session.Mount.PetNetworkId != 0)
             {
                 Dismiss(session, "Your companion returns.");
                 if (peer != null) W2CInteractDeniedPacketSender.Send(peer, "Your companion returns.");
                 return true;
             }
 
-            if (session.IsDead || session.NetworkId is not int ownerId)
+            if (session.Combat.IsDead || session.NetworkId is not int ownerId)
                 return false;
 
             if (!_spawnManager.TryGetTemplate(npcTemplateId, out var template))
@@ -82,7 +73,7 @@ namespace ArcheCore.Server.World.Managers
             // THEY moved.
             _npcAi.RegisterPet(pet, ownerId);
 
-            session.PetNetworkId = pet.NetworkId;
+            session.Mount.PetNetworkId = pet.NetworkId;
 
             Logger.Info("[Pets] Account {Account} summoned '{Pet}' ({Id})", session.AccountId, pet.Name, pet.NetworkId);
             return true;
@@ -94,11 +85,11 @@ namespace ArcheCore.Server.World.Managers
         /// </summary>
         public void Dismiss(PlayerSession session, string reason = null)
         {
-            if (session == null || session.PetNetworkId == 0)
+            if (session == null || session.Mount.PetNetworkId == 0)
                 return;
 
-            int petId = session.PetNetworkId;
-            session.PetNetworkId = 0;
+            int petId = session.Mount.PetNetworkId;
+            session.Mount.PetNetworkId = 0;
 
             // Out of the AI and out of everyone's view (UnregisterPet does
             // both), then out of the spawner's registry.

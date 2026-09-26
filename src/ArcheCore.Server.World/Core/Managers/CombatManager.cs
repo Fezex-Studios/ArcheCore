@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using ArcheCore.Network.Shared.Packets.W2C;
+using ArcheCore.Server.World.Core.Effects;
 using ArcheCore.Server.World.Core.Services;
 using ArcheCore.Server.World.Utils.Config;
 using ArcheCore.Server.World.GameData.Combat;
@@ -24,7 +25,8 @@ namespace ArcheCore.Server.World.Managers
     ///   3. Skill is off cooldown                 (dropped silently - see below)
     ///   4. Target is a live NPC that CAN be hit  (MaxHealth > 0)
     ///   5. Target is in range                    (no line of sight yet)
-    ///   6. Start the cooldown, roll damage, apply it
+    ///   6. Start the cooldown, apply the skill's effects (EffectApplier -
+    ///      damage today; the Effects table decides)
     ///   7. W2CCombatEvent to everyone who can see the target, plus the
     ///      attacker - the same fan-out as JumpEventBroadcaster
     ///   8. If that killed it: NpcAiManager.KillNpc (despawn + respawn
@@ -55,10 +57,24 @@ namespace ArcheCore.Server.World.Managers
     /// health. Nothing is dropped or lost - what death costs is a decision
     /// for later, and this is the hook it will hang off.
     /// </summary>
-    public class CombatManager
+    public class CombatManager : IInitializable
     {
+        private EffectCatalog _effectCatalog;
+        private EffectApplier _effects;
+
+        /// <summary>
+        /// Two-phase start-up. What a hit DOES - damage today, a slow or a
+        /// DoT later - is the skill's effect list, carried out by the shared
+        /// EffectApplier (roadmap fix-first #1). This class decides WHETHER
+        /// a hit happens (range, cooldown, PvP rules) and reports it.
+        /// </summary>
+        public void Initialize(ServiceContainer services)
+        {
+            _effectCatalog = services.Get<EffectCatalog>();
+            _effects = services.Get<EffectApplier>();
+        }
+
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
-        private static readonly Random Rng = new();
 
         /// <summary>Slack on the range check, so standing right at the edge doesn't flicker.</summary>
         private const float RangeTolerance = 0.5f;
@@ -133,7 +149,7 @@ namespace ArcheCore.Server.World.Managers
             if (!_players.TryGetSession(peer, out var session) || session.NetworkId is not int attackerId)
                 return;
 
-            if (session.IsDead)
+            if (session.Combat.IsDead)
             {
                 W2CInteractDeniedPacketSender.Send(peer, "You can't fight while dead.");
                 return;
@@ -148,7 +164,7 @@ namespace ArcheCore.Server.World.Managers
 
             // 3
             long now = ArcheCore.Server.World.ServerClock.NowMs;
-            if (session.SkillCooldowns.TryGetValue(skillId, out long readyAt) && now < readyAt)
+            if (session.Combat.SkillCooldowns.TryGetValue(skillId, out long readyAt) && now < readyAt)
                 return;
 
             // 4 - a player target is PvP, and goes its own way
@@ -177,8 +193,17 @@ namespace ArcheCore.Server.World.Managers
                 return;
             }
 
+            var effects = _effectCatalog.ForSkill(skill);
+            var context = new EffectContext(EffectActor.Of(peer, session), EffectActor.Of(npc), $"skill {skill.Id}");
+
+            if (!_effects.Check(effects, context, out string refused))
+            {
+                if (refused != null) W2CInteractDeniedPacketSender.Send(peer, refused);
+                return;
+            }
+
             // 6
-            session.SkillCooldowns[skillId] = now + skill.CooldownMs;
+            session.Combat.SkillCooldowns[skillId] = now + skill.CooldownMs;
 
             // Hitting something makes it fight back, whatever its aggro radius.
             _npcAi.OnNpcAttacked(npc.NetworkId, attackerId);
@@ -186,9 +211,9 @@ namespace ArcheCore.Server.World.Managers
             // You can't swing from the saddle.
             _players.Mounts?.Dismount(peer, session, "You dismount to fight.");
 
-            int damage = Rng.Next(skill.MinDamage, skill.MaxDamage + 1);
-            npc.Health = Math.Max(0, npc.Health - damage);
-            bool killed = npc.Health == 0;
+            _effects.Apply(effects, context, out var hit);
+            int damage = hit.Damage;
+            bool killed = npc.IsDead;
 
             // 7 - before any death handling, which empties the observer list.
             Broadcast(peer, npc.NetworkId, new W2CCombatEventPacket
@@ -236,7 +261,7 @@ namespace ArcheCore.Server.World.Managers
             if (!_players.TryGetPeer(targetId, out var targetPeer) ||
                 !_players.TryGetSession(targetPeer, out var target) ||
                 target.NetworkId != targetId ||
-                target.IsDead)
+                target.Combat.IsDead)
             {
                 W2CInteractDeniedPacketSender.Send(attackerPeer, "No valid target.");
                 return;
@@ -278,11 +303,20 @@ namespace ArcheCore.Server.World.Managers
                 return;
             }
 
-            attacker.SkillCooldowns[skill.Id] = now + skill.CooldownMs;
+            var effects = _effectCatalog.ForSkill(skill);
+            var context = new EffectContext(EffectActor.Of(attackerPeer, attacker), EffectActor.Of(targetPeer, target), $"skill {skill.Id}");
 
-            int damage = Rng.Next(skill.MinDamage, skill.MaxDamage + 1);
-            target.Health = Math.Max(0, target.Health - damage);
-            bool killed = target.Health == 0;
+            if (!_effects.Check(effects, context, out string refused))
+            {
+                if (refused != null) W2CInteractDeniedPacketSender.Send(attackerPeer, refused);
+                return;
+            }
+
+            attacker.Combat.SkillCooldowns[skill.Id] = now + skill.CooldownMs;
+
+            _effects.Apply(effects, context, out var hit);
+            int damage = hit.Damage;
+            bool killed = target.Combat.IsDead;
 
             Broadcast(attackerPeer, targetId, new W2CCombatEventPacket
             {
@@ -290,15 +324,15 @@ namespace ArcheCore.Server.World.Managers
                 TargetId        = targetId,
                 SkillId         = skill.Id,
                 Damage          = damage,
-                TargetHealth    = target.Health,
-                TargetMaxHealth = target.MaxHealth,
+                TargetHealth    = target.Combat.Health,
+                TargetMaxHealth = target.Combat.MaxHealth,
                 Killed          = killed,
                 CooldownMs      = skill.CooldownMs
             });
 
             // The victim always hears about their own health, even if the
             // interest grid hasn't paired them with the attacker.
-            W2CHealthUpdatePacketSender.Send(targetPeer, target.Health, target.MaxHealth);
+            W2CHealthUpdatePacketSender.Send(targetPeer, target.Combat.Health, target.Combat.MaxHealth);
 
             if (killed)
             {
@@ -322,15 +356,18 @@ namespace ArcheCore.Server.World.Managers
             if (!_players.TryGetPeer(playerId, out var peer) ||
                 !_players.TryGetSession(peer, out var session) ||
                 session.NetworkId != playerId ||
-                session.IsDead)
+                session.Combat.IsDead)
                 return;
 
             if (Vector3.Distance(npc.Position, session.Position) > npc.AttackRange + 1f)
                 return;
 
-            int damage = Rng.Next(npc.AttackDamageMin, npc.AttackDamageMax + 1);
-            session.Health = Math.Max(0, session.Health - damage);
-            bool killed = session.Health == 0;
+            // An NPC's swing is a Damage effect like any skill's, so the one
+            // damage rule (roll, clamp at 0) applies to both directions.
+            var swing = _effectCatalog.ForNpcSwing(npc.AttackDamageMin, npc.AttackDamageMax);
+            _effects.Apply(swing, new EffectContext(EffectActor.Of(npc), EffectActor.Of(peer, session), $"npc {npc.TemplateId} swing"), out var hit);
+            int damage = hit.Damage;
+            bool killed = session.Combat.IsDead;
 
             Broadcast(peer, playerId, new W2CCombatEventPacket
             {
@@ -338,13 +375,13 @@ namespace ArcheCore.Server.World.Managers
                 TargetId        = playerId,
                 SkillId         = 0,
                 Damage          = damage,
-                TargetHealth    = session.Health,
-                TargetMaxHealth = session.MaxHealth,
+                TargetHealth    = session.Combat.Health,
+                TargetMaxHealth = session.Combat.MaxHealth,
                 Killed          = killed,
                 CooldownMs      = 0
             });
 
-            W2CHealthUpdatePacketSender.Send(peer, session.Health, session.MaxHealth);
+            W2CHealthUpdatePacketSender.Send(peer, session.Combat.Health, session.Combat.MaxHealth);
 
             // Being hit throws you off - otherwise riding would be a way to
             // shrug off everything that hits you.
@@ -371,7 +408,7 @@ namespace ArcheCore.Server.World.Managers
 
             // Remembered so the corpse can send them to the nearest
             // graveyard rather than wherever they are when they press it.
-            session.DiedAt = session.Position;
+            session.Combat.DiedAt = session.Position;
 
             W2CPlayerDeathPacketSender.Send(peer, killerName);
             _players.FireDeathEvent(peer, killerTemplateId);
@@ -388,22 +425,22 @@ namespace ArcheCore.Server.World.Managers
             if (!_players.TryGetSession(peer, out var session) || session.NetworkId is not int playerId)
                 return;
 
-            if (!session.IsDead)
+            if (!session.Combat.IsDead)
                 return;
 
             // The nearest respawn point to where they fell, not to where
             // they are now - a dead player doesn't move, but this keeps the
             // rule honest if that ever changes.
-            Vector3 spawn = _spawnPoints.GetRespawnNear(session.DiedAt);
+            Vector3 spawn = _spawnPoints.GetRespawnNear(session.Combat.DiedAt);
 
-            session.Health = session.MaxHealth;
+            session.Combat.Health = session.Combat.MaxHealth;
 
             // A graveyard can be anywhere in the shard. TeleportPlayer moves
             // them through the interest grid too, so the people and NPCs
             // around the graveyard appear and the ones at the corpse go away.
             _players.TeleportPlayer(peer, session, spawn);
 
-            W2CRespawnPacketSender.Send(peer, spawn, session.Health, session.MaxHealth);
+            W2CRespawnPacketSender.Send(peer, spawn, session.Combat.Health, session.Combat.MaxHealth);
 
             Logger.Info("[Combat] Account {Account} respawned at {Spawn}", session.AccountId, spawn);
         }

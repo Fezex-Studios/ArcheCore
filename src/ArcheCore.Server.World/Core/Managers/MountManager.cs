@@ -28,13 +28,6 @@ namespace ArcheCore.Server.World.Managers
     {
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
-        /// <summary>
-        /// Set when the mounts load. The player spawn sender is static and
-        /// needs to name a rider's mount model; same handle pattern as
-        /// InteractionActionCatalog.Current and QuestManager.Current.
-        /// </summary>
-        public static MountManager Current { get; private set; }
-
         private readonly IDbContextFactory<WorldDataDbContext> _dbFactory;
         private readonly PlayerManager _players;
         private readonly InterestManager _interest;
@@ -77,7 +70,6 @@ namespace ArcheCore.Server.World.Managers
                 _mounts[mount.Id] = mount;
             }
 
-            Current = this;
             Logger.Info("[Mounts] Loaded {Count} mount(s).", _mounts.Count);
         }
 
@@ -96,13 +88,13 @@ namespace ArcheCore.Server.World.Managers
         /// <summary>Using a mount item: get on, or get off if already riding.</summary>
         public bool Toggle(NetPeer peer, PlayerSession session, int mountId)
         {
-            if (session.MountId != 0)
+            if (session.Mount.MountId != 0)
             {
                 Dismount(peer, session, "You dismount.");
                 return true;
             }
 
-            if (session.IsDead)
+            if (session.Combat.IsDead)
                 return false;
 
             if (!_mounts.TryGetValue(mountId, out var mount))
@@ -111,8 +103,9 @@ namespace ArcheCore.Server.World.Managers
                 return false;
             }
 
-            session.MountId = mount.Id;
-            session.SpeedMultiplier = mount.SpeedMultiplier;
+            session.Mount.MountId = mount.Id;
+            session.Mount.Model = mount.ModelType;   // for spawn packets to people who see them later
+            session.Mount.SpeedMultiplier = mount.SpeedMultiplier;
 
             Broadcast(peer, session, mount.Id, mount.ModelType, mount.SpeedMultiplier);
             return true;
@@ -124,11 +117,12 @@ namespace ArcheCore.Server.World.Managers
         /// </summary>
         public void Dismount(NetPeer peer, PlayerSession session, string reason = null)
         {
-            if (session == null || session.MountId == 0)
+            if (session == null || session.Mount.MountId == 0)
                 return;
 
-            session.MountId = 0;
-            session.SpeedMultiplier = 1f;
+            session.Mount.MountId = 0;
+            session.Mount.Model = null;
+            session.Mount.SpeedMultiplier = 1f;
 
             Broadcast(peer, session, 0, string.Empty, 1f);
 

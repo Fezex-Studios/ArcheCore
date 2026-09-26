@@ -19,7 +19,7 @@ using Worldserver.ArcheCore.PersistenceServer.Scripts;
 
 namespace ArcheCore.Server.World.Managers
 {
-    public class PlayerManager
+    public class PlayerManager : ArcheCore.Server.World.Core.Services.IInitializable
     {
         private readonly ConcurrentQueue<Action> _pendingActions = new();
         private readonly LuaEngine _luaEngine = new();
@@ -40,14 +40,30 @@ namespace ArcheCore.Server.World.Managers
         private readonly ZoneService _zones;
 
         /// <summary>
-        /// Set at boot by WorldServer. Properties rather than constructor
-        /// arguments because both are built after PlayerManager - the same
-        /// reason QuestManager uses a static handle.
+        /// Found in Initialize (two-phase start-up): all three are built
+        /// after PlayerManager, and all three need it.
         /// </summary>
-        public MountManager Mounts { get; set; }
-        public PetManager Pets { get; set; }
+        public MountManager Mounts { get; private set; }
+        public PetManager Pets { get; private set; }
+        public QuestManager Quests { get; private set; }
+
+        private ArcheCore.Server.World.Core.Effects.EffectCatalog _effectCatalog;
+        private ArcheCore.Server.World.Core.Effects.EffectApplier _effectApplier;
+
+        public void Initialize(ArcheCore.Server.World.Core.Services.ServiceContainer services)
+        {
+            Mounts = services.Get<MountManager>();
+            Pets = services.Get<PetManager>();
+            Quests = services.Get<QuestManager>();
+            _effectCatalog = services.Get<ArcheCore.Server.World.Core.Effects.EffectCatalog>();
+            _effectApplier = services.Get<ArcheCore.Server.World.Core.Effects.EffectApplier>();
+
+            _spawn.Pets = Pets;
+            _spawn.Quests = Quests;
+        }
 
         public InterestManager Interest => _interest;
+        public CharacterPersistence Persistence => _persistence;
         public JumpEventBroadcaster Jumps => _jumps;
         public SnapshotDispatcher Snapshots => _snapshots;
         public WorldTerrainService Terrain => _terrain;
@@ -277,7 +293,7 @@ namespace ArcheCore.Server.World.Managers
 
         /// <summary>Dead players don't move. The client locks input too; this is the authority.</summary>
         public bool TryAcceptMovementChecked(NetPeer peer, PlayerSession session, Vector3 position, Vector3 velocity) =>
-            !session.IsDead && TryAcceptMovement(peer, session, position, velocity);
+            !session.Combat.IsDead && TryAcceptMovement(peer, session, position, velocity);
 
         public bool TryAcceptMovement(NetPeer peer, PlayerSession session, Vector3 position, Vector3 velocity) =>
             _validator.Validate(peer, session, position, velocity) == MovementValidator.Result.Accepted;
@@ -333,7 +349,7 @@ namespace ArcheCore.Server.World.Managers
             TryGetPeer(networkId, out var peer) &&
             TryGetSession(peer, out var session) &&
             session.NetworkId == networkId &&
-            !session.IsDead;
+            !session.Combat.IsDead;
 
         /// <summary>PlayerEvent.OnDeath(player, killerNpcTemplateId).</summary>
         public void FireDeathEvent(NetPeer peer, int killerTemplateId)
@@ -409,9 +425,9 @@ namespace ArcheCore.Server.World.Managers
             session.Level += 1;
 
             // A level-up raises max health and refills it, MMO-style.
-            session.MaxHealth = ArcheCore.Server.World.Core.Combat.HealthRules.PlayerMaxHealth(session.Level);
-            session.Health = session.MaxHealth;
-            W2CHealthUpdatePacketSender.Send(peer, session.Health, session.MaxHealth);
+            session.Combat.MaxHealth = ArcheCore.Server.World.Core.Combat.HealthRules.PlayerMaxHealth(session.Level);
+            session.Combat.Health = session.Combat.MaxHealth;
+            W2CHealthUpdatePacketSender.Send(peer, session.Combat.Health, session.Combat.MaxHealth);
             _persistence.SaveInBackground(session);
             return session.Level;
         }
@@ -427,12 +443,12 @@ namespace ArcheCore.Server.World.Managers
 
             // long, so neither direction can wrap: a big sale can't overflow
             // to negative, and a big purchase can't underflow to positive.
-            long result = (long)session.Gold + delta;
+            long result = (long)session.Inventory.Gold + delta;
             if (result < 0 || result > int.MaxValue)
                 return false;
 
-            session.Gold = (int)result;
-            W2CGoldUpdatePacketSender.Send(peer, session.Gold);
+            session.Inventory.Gold = (int)result;
+            W2CGoldUpdatePacketSender.Send(peer, session.Inventory.Gold);
             return true;
         }
 
@@ -440,7 +456,7 @@ namespace ArcheCore.Server.World.Managers
         //
         // Same authority rule as gold: TryAddItem and TryMoveItem are the
         // ONLY place session.Inventory is ever written. Both set
-        // InventoryDirty = true on any real change - that's the one line
+        // Inventory.Dirty = true on any real change - that's the one line
         // that's new compared to the in-memory pass; everything about the
         // move/merge/swap logic itself is unchanged, because persistence
         // is a concern of WHEN and WHAT gets saved, not of how a swap is
@@ -473,7 +489,7 @@ namespace ArcheCore.Server.World.Managers
                 return false;
             }
 
-            var inventory = session.Inventory;
+            var inventory = session.Inventory.Slots;
 
             for (int i = 0; i < inventory.Length; i++)
             {
@@ -486,7 +502,7 @@ namespace ArcheCore.Server.World.Managers
                     continue;
 
                 inventory[i].Quantity += quantity;
-                session.InventoryDirty = true;
+                session.Inventory.Dirty = true;
                 W2CInventorySlotChangedPacketSender.Send(peer, i, inventory[i]);
                 return true;
             }
@@ -496,7 +512,7 @@ namespace ArcheCore.Server.World.Managers
                 if (inventory[i].ItemTemplateId == 0)
                 {
                     inventory[i] = new InventorySlot { ItemTemplateId = itemTemplateId, Quantity = quantity };
-                    session.InventoryDirty = true;
+                    session.Inventory.Dirty = true;
                     W2CInventorySlotChangedPacketSender.Send(peer, i, inventory[i]);
                     return true;
                 }
@@ -519,13 +535,13 @@ namespace ArcheCore.Server.World.Managers
             if (itemTemplateId <= 0 || quantity <= 0 || !_items.Exists(itemTemplateId))
                 return false;
 
-            foreach (var slot in session.Inventory)
+            foreach (var slot in session.Inventory.Slots)
             {
                 if (slot.ItemTemplateId == itemTemplateId && (long)slot.Quantity + quantity <= int.MaxValue)
                     return true;
             }
 
-            foreach (var slot in session.Inventory)
+            foreach (var slot in session.Inventory.Slots)
             {
                 if (slot.ItemTemplateId == 0)
                     return true;
@@ -559,10 +575,10 @@ namespace ArcheCore.Server.World.Managers
             if (!TryGetSession(peer, out var session) || session.NetworkId == null)
                 return false;
 
-            if (slot < 0 || slot >= session.Inventory.Length)
+            if (slot < 0 || slot >= session.Inventory.Slots.Length)
                 return false;
 
-            contents = session.Inventory[slot];
+            contents = session.Inventory.Slots[slot];
             return true;
         }
 
@@ -576,7 +592,7 @@ namespace ArcheCore.Server.World.Managers
             if (!TryGetSession(peer, out var session) || session.NetworkId == null)
                 return false;
 
-            var inventory = session.Inventory;
+            var inventory = session.Inventory.Slots;
 
             if (fromSlot < 0 || fromSlot >= inventory.Length ||
                 toSlot   < 0 || toSlot   >= inventory.Length)
@@ -610,7 +626,7 @@ namespace ArcheCore.Server.World.Managers
                 inventory[toSlot]   = from;
             }
 
-            session.InventoryDirty = true;
+            session.Inventory.Dirty = true;
             W2CInventorySlotChangedPacketSender.Send(peer, fromSlot, inventory[fromSlot]);
             W2CInventorySlotChangedPacketSender.Send(peer, toSlot,   inventory[toSlot]);
             return true;
@@ -666,13 +682,13 @@ namespace ArcheCore.Server.World.Managers
             if (!TryGetSession(peer, out var session) || session.NetworkId == null)
                 return false;
 
-            if (session.IsDead)
+            if (session.Combat.IsDead)
             {
                 W2CInteractDeniedPacketSender.Send(peer, "You can't do that while dead.");
                 return false;
             }
 
-            var inventory = session.Inventory;
+            var inventory = session.Inventory.Slots;
 
             // 1
             if (slot < 0 || slot >= inventory.Length)
@@ -691,7 +707,7 @@ namespace ArcheCore.Server.World.Managers
             long now = ArcheCore.Server.World.ServerClock.NowMs;
             int cooldownKey = ItemManager.CooldownKey(use);
 
-            if (session.ItemCooldowns.TryGetValue(cooldownKey, out long readyAt) && now < readyAt)
+            if (session.Inventory.Cooldowns.TryGetValue(cooldownKey, out long readyAt) && now < readyAt)
                 return false;
 
             // 4
@@ -709,7 +725,7 @@ namespace ArcheCore.Server.World.Managers
             // 6
             if (use.CooldownMs > 0)
             {
-                session.ItemCooldowns[cooldownKey] = now + use.CooldownMs;
+                session.Inventory.Cooldowns[cooldownKey] = now + use.CooldownMs;
                 W2CItemCooldownPacketSender.Send(
                     peer, cooldownKey, _items.ItemsSharingCooldown(use), use.CooldownMs);
             }
@@ -720,60 +736,29 @@ namespace ArcheCore.Server.World.Managers
         }
 
         /// <summary>
-        /// Applies an ItemUse's built-in effect. Returns false to reject the
-        /// use without consuming the item or starting its cooldown.
+        /// Runs the item's effects (EffectCatalog.ForItem - its Effects rows,
+        /// or its old ItemUses EffectType/EffectValue). Returns false to
+        /// reject the use without consuming the item or starting its
+        /// cooldown: a heal at full health, a mount while dead, broken data.
         ///
-        /// Heal / ApplyBuff / CastSkill are STUBS that log and succeed, so
-        /// the full consume + cooldown pipeline can be tested today. Each
-        /// becomes real when its system exists:
-        ///   Heal      - roadmap G. Return false at full HP if you want
-        ///               potions to be un-drinkable when they'd be wasted.
-        ///   ApplyBuff - with the buff system.
-        ///   CastSkill - roadmap H.
+        /// Check before Apply, so nothing happens unless everything can.
         /// </summary>
         private bool TryApplyItemEffect(NetPeer peer, PlayerSession session, ItemUse use)
         {
-            switch (use.EffectType)
+            var effects = _effectCatalog?.ForItem(use);
+            if (effects == null)
+                return false;
+
+            var context = ArcheCore.Server.World.Core.Effects.EffectContext.OnSelf(peer, session, $"item {use.ItemId}");
+
+            if (!_effectApplier.Check(effects, context, out string reason))
             {
-                case ItemEffectType.ScriptOnly:
-                    return true; // Lua does the work in OnItemUse
-
-                case ItemEffectType.Heal:
-                    // Refused at full health, so a potion is never wasted -
-                    // returning false here means it isn't consumed and its
-                    // cooldown doesn't start.
-                    if (session.IsDead)
-                        return false;
-
-                    if (session.Health >= session.MaxHealth)
-                    {
-                        W2CInteractDeniedPacketSender.Send(peer, "You are already at full health.");
-                        return false;
-                    }
-
-                    session.Health = System.Math.Min(session.MaxHealth, session.Health + System.Math.Max(0, use.EffectValue));
-                    W2CHealthUpdatePacketSender.Send(peer, session.Health, session.MaxHealth);
-                    return true;
-
-                case ItemEffectType.Mount:
-                    // Toggles: using it while riding puts you back on foot.
-                    return Mounts != null && Mounts.Toggle(peer, session, use.EffectValue);
-
-                case ItemEffectType.SummonPet:
-                    return Pets != null && Pets.Toggle(peer, session, use.EffectValue);
-
-                case ItemEffectType.ApplyBuff:
-                    Logger.Info($"[UseItem] STUB ApplyBuff {use.EffectValue} for account {session.AccountId} - no buff system yet");
-                    return true;
-
-                case ItemEffectType.CastSkill:
-                    Logger.Info($"[UseItem] STUB CastSkill {use.EffectValue} for account {session.AccountId} - no skill system yet (roadmap H)");
-                    return true;
-
-                default:
-                    Logger.Warn($"[UseItem] Item {use.ItemId} has unknown EffectType {(int)use.EffectType} - rejected");
-                    return false;
+                if (reason != null)
+                    W2CInteractDeniedPacketSender.Send(peer, reason);
+                return false;
             }
+
+            return _effectApplier.Apply(effects, context, out _);
         }
 
         /// <summary>
@@ -787,7 +772,7 @@ namespace ArcheCore.Server.World.Managers
             itemTemplateId = 0;
             removed = 0;
 
-            var inventory = session.Inventory;
+            var inventory = session.Inventory.Slots;
 
             if (slot < 0 || slot >= inventory.Length)
                 return false;
@@ -809,7 +794,7 @@ namespace ArcheCore.Server.World.Managers
                 inventory[slot].Quantity -= quantity;
             }
 
-            session.InventoryDirty = true;
+            session.Inventory.Dirty = true;
             W2CInventorySlotChangedPacketSender.Send(peer, slot, inventory[slot]);
             return true;
         }

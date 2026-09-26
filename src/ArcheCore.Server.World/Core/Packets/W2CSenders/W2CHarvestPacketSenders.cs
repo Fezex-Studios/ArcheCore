@@ -12,7 +12,7 @@ namespace ArcheCore.Server.World.Networking.W2C
 {
     public static class W2CSpawnHarvestNodePacketSender
     {
-        public static void Send(ReplicationManager replication, NetPeer peer, HarvestNodeEntity node)
+        public static void Send(ReplicationManager replication, NetPeer peer, HarvestNodeEntity node, InteractionActionData[] actions)
         {
             replication.Send(
                 Opcodes.W2CSpawnHarvestNode,
@@ -28,7 +28,7 @@ namespace ArcheCore.Server.World.Networking.W2C
                     Yaw           = node.Yaw,
                     InteractRange = node.InteractRange,
                     IsDepleted    = node.IsDepleted,
-                    Actions       = InteractionActionCatalog.ActionsFor(InteractableKind.HarvestNode, node.TemplateId)
+                    Actions       = actions
                 },
                 peer);
         }

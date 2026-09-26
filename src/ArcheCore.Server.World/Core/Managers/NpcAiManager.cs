@@ -1,4 +1,5 @@
 using System;
+using ArcheCore.Server.World.Core.Interaction;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Numerics;
@@ -63,7 +64,7 @@ namespace ArcheCore.Server.World.Managers
     ///     unbounded over a long uptime, not a fixed cost. RemoveNpcInterest
     ///     is the single choke point for NPC despawn and does it there.
     /// </summary>
-    public class NpcAiManager
+    public class NpcAiManager : ArcheCore.Server.World.Core.Services.IInitializable
     {
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
         private static readonly Random _rng = new();
@@ -74,7 +75,7 @@ namespace ArcheCore.Server.World.Managers
         private readonly PlayerManager _playerManager;
 
         /// <summary>
-        /// Set after construction (SetCombat) rather than injected: combat
+        /// Set in Initialize (two-phase start-up) rather than the constructor: combat
         /// needs the AI to kill NPCs and the AI needs combat to hit players,
         /// and one of the two has to be built first.
         /// </summary>
@@ -100,7 +101,7 @@ namespace ArcheCore.Server.World.Managers
         private readonly ConcurrentDictionary<int, NpcAiState> _active = new();
 
         // Dead NPCs waiting to be replaced: (spawner id, when). Tick thread only.
-        private readonly List<(int SpawnerId, TimeSpan DueAt)> _respawns = new();
+        private Scheduler _scheduler;
 
         // Reused every leash-heal, tick thread only.
         private readonly List<NetPeer> _healScratch = new();
@@ -198,18 +199,22 @@ namespace ArcheCore.Server.World.Managers
         }
 
         /// <summary>
-        /// Called once per tick from WorldServer's tick loop, on the same
-        /// thread as everything else that touches InterestManager/
-        /// SpatialGrid. Movement runs every tick; waypoint decisions and
-        /// spawner scans are rate-limited by DecisionInterval/
-        /// SpawnerScanInterval so this stays cheap on ticks where neither
-        /// is due yet.
+        /// Two-phase start-up (IInitializable). Combat and the AI need each
+        /// other - the AI swings through CombatManager, combat kills NPCs
+        /// through the AI - so the link is made once both exist.
         /// </summary>
-        /// <summary>Called once at boot by WorldServer, after CombatManager exists.</summary>
-        public void SetCombat(CombatManager combat) => _combat = combat;
+        private InteractionActionCatalog _actions;
 
-        /// <summary>Called once at boot by WorldServer when NpcGroundSnap is on.</summary>
-        public void SetTerrain(WorldTerrainService terrain) => _terrain = terrain;
+        public void Initialize(ArcheCore.Server.World.Core.Services.ServiceContainer services)
+        {
+            _combat = services.Get<CombatManager>();
+            _scheduler = services.Get<Scheduler>();
+            _actions = services.Get<InteractionActionCatalog>();
+
+            if (services.Get<ArcheCore.Server.World.Utils.Config.WorldServerConfig>().NpcGroundSnap)
+                _terrain = services.Get<ArcheCore.Server.World.Core.World.WorldTerrainService>();
+        }
+
 
         /// <summary>
         /// Ground distance, ignoring height. Arrival checks use this because
@@ -283,14 +288,19 @@ namespace ArcheCore.Server.World.Managers
             }
         }
 
+        /// <summary>
+        /// Called once per tick from WorldServer's tick loop, on the same
+        /// thread as everything else that touches InterestManager/
+        /// SpatialGrid. Movement runs every tick; waypoint decisions and
+        /// spawner scans are rate-limited by DecisionInterval/
+        /// SpawnerScanInterval so this stays cheap on ticks where neither
+        /// is due yet.
+        /// </summary>
         public void Tick()
         {
             try
             {
                 var now = ServerClock.Elapsed;
-
-                if (_respawns.Count > 0)
-                    RunRespawns(now);
 
                 if (now - _lastSpawnerScan >= SpawnerScanInterval)
                 {
@@ -421,25 +431,18 @@ namespace ArcheCore.Server.World.Managers
             _spawnManager.ApplyDespawnSingle(npc);
 
             var delay = npc.RespawnSeconds > 0 ? TimeSpan.FromSeconds(npc.RespawnSeconds) : DefaultRespawn;
-            _respawns.Add((npc.SpawnerId, ServerClock.Elapsed + delay));
+            int spawnerId = npc.SpawnerId;
+            _scheduler.In(delay, () => RespawnOne(spawnerId), "npc respawn");
         }
 
-        private void RunRespawns(TimeSpan now)
+        /// <summary>A Scheduler callback: one replacement for a killed NPC.</summary>
+        private void RespawnOne(int spawnerId)
         {
-            for (int i = _respawns.Count - 1; i >= 0; i--)
-            {
-                if (now < _respawns[i].DueAt)
-                    continue;
-
-                int spawnerId = _respawns[i].SpawnerId;
-                _respawns.RemoveAt(i);
-
-                // Null when the spawner went inactive meanwhile (no players
-                // around) - its next activation refills the whole group.
-                var npc = _spawnManager.ApplyRespawnOne(spawnerId);
-                if (npc != null)
-                    StartNpc(npc);
-            }
+            // Null when the spawner went inactive meanwhile (no players
+            // around) - its next activation refills the whole group.
+            var npc = _spawnManager.ApplyRespawnOne(spawnerId);
+            if (npc != null)
+                StartNpc(npc);
         }
 
         // Main thread only (enqueued).
@@ -766,7 +769,7 @@ namespace ArcheCore.Server.World.Managers
             {
                 if (SpawnManager.IsNpcId(otherId)) continue;
                 if (!_playerManager.TryGetPeer(otherId, out var peer)) continue;
-                W2CSpawnNpcPacketSender.Send(_replication, peer, npc);
+                W2CSpawnNpcPacketSender.Send(_replication, peer, npc, _actions.For(InteractableKind.Npc, npc.TemplateId));
             }
 
             foreach (var otherId in left)
@@ -806,7 +809,7 @@ namespace ArcheCore.Server.World.Managers
             {
                 if (SpawnManager.IsNpcId(otherId)) continue;
                 if (!_playerManager.TryGetPeer(otherId, out var peer)) continue;
-                W2CSpawnNpcPacketSender.Send(_replication, peer, npc);
+                W2CSpawnNpcPacketSender.Send(_replication, peer, npc, _actions.For(InteractableKind.Npc, npc.TemplateId));
             }
         }
 

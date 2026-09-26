@@ -89,7 +89,7 @@ namespace ArcheCore.Server.World.Networking.C2W
             if (!_playerManager.TryGetNetworkId(peer, out int playerId))
                 return;
 
-            if (_playerManager.TryGetSession(peer, out var session) && session.IsDead)
+            if (_playerManager.TryGetSession(peer, out var session) && session.Combat.IsDead)
             {
                 W2CInteractDeniedPacketSender.Send(peer, "You can't do that while dead.");
                 return;

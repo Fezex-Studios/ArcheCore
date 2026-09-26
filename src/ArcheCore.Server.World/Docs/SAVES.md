@@ -33,6 +33,15 @@ The old `/characters/save`, `/characters/inventory/save` and
 `/characters/quests/save` routes still exist but the world server no longer
 calls them.
 
+## Where the snapshot comes from
+
+`CharacterPersistence.Capture` fills in identity, level and position, then
+asks every **saved session component** (`IPersistentComponent`, listed in
+`PlayerSession.PersistentComponents`) to write its part: `InventoryComponent`
+writes gold and the bag, `QuestComponent` writes the quest log (or `null`
+until the log has been loaded). Components never save themselves - one
+snapshot, one transaction. See [CORE_SYSTEMS.md](CORE_SYSTEMS.md).
+
 ## The save chain (world server)
 
 `CharacterSaveChain`, one per character, owned by `CharacterPersistence`:

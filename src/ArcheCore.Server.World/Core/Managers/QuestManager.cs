@@ -50,22 +50,12 @@ using NLog;
 /// objectives and takes the Collect items. The client's buttons are a
 /// convenience, never the authority.
 /// </summary>
-public class QuestManager
+public class QuestManager : ArcheCore.Server.World.Core.Services.IInitializable
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
     /// <summary>Same slack as every other interaction range check.</summary>
     private const float RangeTolerance = 1.0f;
-
-    /// <summary>
-    /// Set once at boot by Initialize. Same handle as
-    /// InteractionActionCatalog.Current, and for the same reason: two
-    /// classes built before this one (PlayerSpawnManager, which
-    /// PlayerManager constructs, and CharacterPersistence) need it, and
-    /// threading it through their constructors would mean rebuilding half
-    /// the server's wiring for one field.
-    /// </summary>
-    public static QuestManager Current { get; private set; }
 
     private readonly IServiceScopeFactory _scopeFactory;
 
@@ -90,19 +80,19 @@ public class QuestManager
     }
 
     /// <summary>
-    /// Called once at boot, after the managers it needs exist. Subscribing to
-    /// the Lua engine here is what wires quests to kills, talks and harvests.
+    /// Two-phase start-up (IInitializable): everything exists by now.
+    /// Subscribing to the Lua engine here is what wires quests to kills,
+    /// talks and harvests.
     /// </summary>
-    public void Initialize(PlayerManager players, ItemManager items, SpawnManager spawnManager, LuaEngine luaEngine)
+    public void Initialize(ArcheCore.Server.World.Core.Services.ServiceContainer services)
     {
-        _players = players;
-        _items = items;
-        _spawnManager = spawnManager;
+        _players = services.Get<PlayerManager>();
+        _items = services.Get<ItemManager>();
+        _spawnManager = services.Get<SpawnManager>();
 
+        var luaEngine = _players.LuaEngine;
         if (luaEngine != null)
             luaEngine.EventFired += OnGameEvent;
-
-        Current = this;
     }
 
     // ── Definitions ──────────────────────────────────────────────────
@@ -224,9 +214,11 @@ public class QuestManager
     /// <summary>Rebuild a character's quest state from storage, on spawn.</summary>
     public void LoadInto(PlayerSession session, QuestStateDto[] stored)
     {
+        // From here on the saves own the quest rows (QuestComponent.Loaded):
+        // every snapshot sends the whole log, carried-along unknown rows
+        // included. Saving is QuestComponent.WriteTo.
         session.Quests.Clear();
-        session.QuestsDirty = false;
-        session.UnknownQuestRows = null;
+        session.Quests.Loaded = true;
 
         if (stored == null)
             return;
@@ -245,7 +237,7 @@ public class QuestManager
                 continue;
             }
 
-            session.Quests[row.QuestId] = new QuestProgress
+            session.Quests.Progress[row.QuestId] = new QuestProgress
             {
                 QuestId = row.QuestId,
                 Status  = (QuestStatus)row.Status,
@@ -253,30 +245,7 @@ public class QuestManager
             };
         }
 
-        session.UnknownQuestRows = unknown?.ToArray();
-    }
-
-    /// <summary>Everything worth saving for this character (see CharacterPersistence).</summary>
-    public QuestStateDto[] BuildSaveSet(PlayerSession session)
-    {
-        var unknown = session.UnknownQuestRows ?? Array.Empty<QuestStateDto>();
-        var rows = new QuestStateDto[session.Quests.Count + unknown.Length];
-        int i = 0;
-
-        foreach (var row in unknown)
-            rows[i++] = row;
-
-        foreach (var quest in session.Quests.Values)
-        {
-            rows[i++] = new QuestStateDto
-            {
-                QuestId  = quest.QuestId,
-                Status   = (byte)quest.Status,
-                Progress = quest.ToProgressString()
-            };
-        }
-
-        return rows;
+        session.Quests.UnknownRows = unknown?.ToArray();
     }
 
     /// <summary>Catalogue then state, right after W2CEnterWorld.</summary>
@@ -288,7 +257,7 @@ public class QuestManager
     }
 
     private QuestProgressData[] BuildLog(PlayerSession session) =>
-        session.Quests.Values.Select(ToClient).ToArray();
+        session.Quests.Progress.Values.Select(ToClient).ToArray();
 
     private static QuestProgressData ToClient(QuestProgress quest) => new()
     {
@@ -314,7 +283,7 @@ public class QuestManager
             bool gives = quest.GiverNpcTemplateId == npc.TemplateId;
             bool takes = quest.TurnInNpcTemplateId == npc.TemplateId;
 
-            session.Quests.TryGetValue(quest.Id, out var state);
+            session.Quests.Progress.TryGetValue(quest.Id, out var state);
 
             if (state == null || state.Status == QuestStatus.None)
             {
@@ -341,7 +310,7 @@ public class QuestManager
     {
         var quest = definition.Record;
 
-        if (session.Quests.TryGetValue(quest.Id, out var existing) && existing.Status != QuestStatus.None)
+        if (session.Quests.Progress.TryGetValue(quest.Id, out var existing) && existing.Status != QuestStatus.None)
         {
             reason = existing.Status == QuestStatus.TurnedIn ? "You've already done that." : "You already have that quest.";
             return false;
@@ -354,7 +323,7 @@ public class QuestManager
         }
 
         if (quest.RequiredQuestId != 0 &&
-            (!session.Quests.TryGetValue(quest.RequiredQuestId, out var prerequisite) || prerequisite.Status != QuestStatus.TurnedIn))
+            (!session.Quests.Progress.TryGetValue(quest.RequiredQuestId, out var prerequisite) || prerequisite.Status != QuestStatus.TurnedIn))
         {
             reason = "You're not ready for that yet.";
             return false;
@@ -388,8 +357,8 @@ public class QuestManager
             Counts  = new int[definition.Objectives.Length]
         };
 
-        session.Quests[questId] = progress;
-        session.QuestsDirty = true;
+        session.Quests.Progress[questId] = progress;
+        session.Quests.Dirty = true;
 
         // Collect objectives may already be satisfied by what's in the bag.
         RecountCollectObjectives(peer, session, announce: false);
@@ -414,7 +383,7 @@ public class QuestManager
             return;
         }
 
-        if (!session.Quests.TryGetValue(questId, out var progress) || progress.Status == QuestStatus.None)
+        if (!session.Quests.Progress.TryGetValue(questId, out var progress) || progress.Status == QuestStatus.None)
         {
             W2CInteractDeniedPacketSender.Send(peer, "You don't have that quest.");
             return;
@@ -459,7 +428,7 @@ public class QuestManager
             _players.TryAddItem(peer, reward.RewardItemId, reward.RewardItemQuantity);
 
         progress.Status = QuestStatus.TurnedIn;
-        session.QuestsDirty = true;
+        session.Quests.Dirty = true;
 
         string message = !string.IsNullOrWhiteSpace(reward.CompleteText)
             ? reward.CompleteText
@@ -486,7 +455,7 @@ public class QuestManager
         if (!_players.TryGetSession(peer, out var session) || session.NetworkId == null)
             return;
 
-        if (!session.Quests.TryGetValue(questId, out var progress))
+        if (!session.Quests.Progress.TryGetValue(questId, out var progress))
             return;
 
         if (progress.Status == QuestStatus.TurnedIn)
@@ -498,8 +467,8 @@ public class QuestManager
         // Forgotten entirely, so it can be taken again - the save turns a
         // status of 0 into a deleted row.
         progress.Status = QuestStatus.None;
-        session.Quests.Remove(questId);
-        session.QuestsDirty = true;
+        session.Quests.Progress.Remove(questId);
+        session.Quests.Dirty = true;
 
         string name = _quests.TryGetValue(questId, out var definition) ? definition.Record.Name : "Quest";
         W2CQuestUpdatePacketSender.Send(peer, ToClient(progress), $"Abandoned: {name}", removed: true);
@@ -514,7 +483,7 @@ public class QuestManager
         if (!_players.TryGetSession(peer, out session) || session.NetworkId == null)
             return false;
 
-        if (session.IsDead)
+        if (session.Combat.IsDead)
         {
             W2CInteractDeniedPacketSender.Send(peer, "You can't do that while dead.");
             return false;
@@ -551,7 +520,7 @@ public class QuestManager
 
         if (!_players.TryGetPeer(player.NetworkId, out var peer) ||
             !_players.TryGetSession(peer, out var session) ||
-            session.Quests.Count == 0)
+            session.Quests.Progress.Count == 0)
             return;
 
         switch (evt)
@@ -576,7 +545,7 @@ public class QuestManager
     /// <summary>Tick a counting objective on every active quest that wants it.</summary>
     private void Advance(NetPeer peer, PlayerSession session, QuestObjectiveType type, int targetId, int amount)
     {
-        foreach (var progress in session.Quests.Values.ToList())
+        foreach (var progress in session.Quests.Progress.Values.ToList())
         {
             if (progress.Status != QuestStatus.Active) continue;
             if (!_quests.TryGetValue(progress.QuestId, out var definition)) continue;
@@ -595,7 +564,7 @@ public class QuestManager
 
             if (!changed) continue;
 
-            session.QuestsDirty = true;
+            session.Quests.Dirty = true;
             Announce(peer, progress, definition);
             CheckCompletion(peer, session, progress, definition);
         }
@@ -607,9 +576,9 @@ public class QuestManager
     /// </summary>
     private void RecountCollectObjectives(NetPeer peer, PlayerSession session, bool announce)
     {
-        if (session.Quests.Count == 0) return;
+        if (session.Quests.Progress.Count == 0) return;
 
-        foreach (var progress in session.Quests.Values.ToList())
+        foreach (var progress in session.Quests.Progress.Values.ToList())
         {
             if (progress.Status is not (QuestStatus.Active or QuestStatus.Complete)) continue;
             if (!_quests.TryGetValue(progress.QuestId, out var definition)) continue;
@@ -630,7 +599,7 @@ public class QuestManager
 
             if (!changed) continue;
 
-            session.QuestsDirty = true;
+            session.Quests.Dirty = true;
 
             if (announce)
                 Announce(peer, progress, definition);
@@ -651,7 +620,7 @@ public class QuestManager
     private static int CountInBag(PlayerSession session, int itemTemplateId)
     {
         int total = 0;
-        foreach (var slot in session.Inventory)
+        foreach (var slot in session.Inventory.Slots)
             if (slot.ItemTemplateId == itemTemplateId)
                 total += slot.Quantity;
 
@@ -675,7 +644,7 @@ public class QuestManager
             return;
 
         progress.Status = QuestStatus.Complete;
-        session.QuestsDirty = true;
+        session.Quests.Dirty = true;
 
         W2CQuestUpdatePacketSender.Send(peer, ToClient(progress), $"{definition.Record.Name} - ready to hand in.", removed: false);
     }
@@ -704,11 +673,11 @@ public class QuestManager
         {
             int left = count;
 
-            for (int slot = 0; slot < session.Inventory.Length && left > 0; slot++)
+            for (int slot = 0; slot < session.Inventory.Slots.Length && left > 0; slot++)
             {
-                if (session.Inventory[slot].ItemTemplateId != itemId) continue;
+                if (session.Inventory.Slots[slot].ItemTemplateId != itemId) continue;
 
-                int take = Math.Min(left, session.Inventory[slot].Quantity);
+                int take = Math.Min(left, session.Inventory.Slots[slot].Quantity);
                 _players.TryTakeFromSlot(peer, slot, take, out _, out int removed);
                 left -= removed;
 

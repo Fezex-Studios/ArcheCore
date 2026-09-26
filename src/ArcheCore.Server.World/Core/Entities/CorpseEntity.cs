@@ -22,6 +22,9 @@ public class CorpseEntity : IInteractable
     public string  OwnerName        { get; init; } = string.Empty;
 
     public long    ExpiresAtMs;
+
+    /// <summary>The Scheduler callback that removes it; cancelled if it goes away sooner (looted empty).</summary>
+    public ArcheCore.Server.World.Scheduler.Handle Expiry;
     public int     Gold;
     public readonly List<(int ItemId, int Quantity)> Items = new();
 

@@ -185,9 +185,9 @@ namespace ArcheCore.Server.World.Managers
                 return;
 
             long total = (long)row.BuyPrice * quantity;
-            if (total > session.Gold)
+            if (total > session.Inventory.Gold)
             {
-                Fail(peer, $"You need {total}g for that - you have {session.Gold}g.");
+                Fail(peer, $"You need {total}g for that - you have {session.Inventory.Gold}g.");
                 return;
             }
 
@@ -247,7 +247,7 @@ namespace ArcheCore.Server.World.Managers
             int count = quantity <= 0 || quantity > contents.Quantity ? contents.Quantity : quantity;
             long total = (long)row.SellPrice * count;
 
-            if ((long)session.Gold + total > int.MaxValue)
+            if ((long)session.Inventory.Gold + total > int.MaxValue)
             {
                 Fail(peer, "You can't carry that much gold.");
                 return;

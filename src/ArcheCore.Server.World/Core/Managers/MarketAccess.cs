@@ -11,7 +11,7 @@ namespace ArcheCore.Server.World.Managers
     ///
     /// ArcheAge-style: the auction house is an auctioneer you walk to, the
     /// mailbox is a mailbox you walk to. Opening either through Interact
-    /// remembers WHICH NPC it was (PlayerSession.MarketTargetId); every
+    /// remembers WHICH NPC it was (PlayerSession.Market.TargetId); every
     /// later auction or mail packet is then checked against that NPC -
     /// still there, still offering that action, and the player still
     /// standing next to it. Same rule ShopManager uses for merchants: a
@@ -41,7 +41,7 @@ namespace ArcheCore.Server.World.Managers
 
         /// <summary>The player opened a market window through this NPC. Called by C2WInteractHandler.</summary>
         public void Opened(PlayerSession session, int targetNetworkId) =>
-            session.MarketTargetId = targetNetworkId;
+            session.Market.TargetId = targetNetworkId;
 
         /// <summary>
         /// May this player use <paramref name="action"/> right now? Tells
@@ -54,8 +54,8 @@ namespace ArcheCore.Server.World.Managers
 
             string where = action == InteractionActionType.Auction ? "an auctioneer" : "a mailbox";
 
-            if (session.MarketTargetId == 0 ||
-                !_interactions.TryGet(session.MarketTargetId, out var target) ||
+            if (session.Market.TargetId == 0 ||
+                !_interactions.TryGet(session.Market.TargetId, out var target) ||
                 !_actions.TryGet(target.Kind, target.TemplateId, (int)action, out var offered) ||
                 !offered.IsEnabled)
             {

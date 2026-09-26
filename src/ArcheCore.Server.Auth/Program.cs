@@ -146,6 +146,7 @@ app.UseRateLimiter();
 
 app.MapRegister();
 app.MapLogin();
+app.MapSessionEndpoints();
 app.MapValidateSession();
 app.MapGameData();
 

@@ -10,12 +10,10 @@ namespace ArcheCore.Server.World.Networking.W2C
 {
     public static class W2CSpawnPlayerPacketSender
     {
+        // The rider's mount model is kept on their session by MountManager,
+        // so this static sender needs no handle to MountManager.
         private static string MountModelFor(PlayerSession subject) =>
-            subject != null && subject.MountId != 0 &&
-            MountManager.Current != null &&
-            MountManager.Current.TryGetModel(subject.MountId, out var model)
-                ? model
-                : string.Empty;
+            subject != null && subject.Mount.MountId != 0 ? subject.Mount.Model ?? string.Empty : string.Empty;
 
         public static void Send(
             ReplicationManager replication,
@@ -40,8 +38,8 @@ namespace ArcheCore.Server.World.Networking.W2C
                     // the target frame. Null (an older call site) just means
                     // the client shows a nameless plate with no bar.
                     Name          = subject?.Name ?? string.Empty,
-                    Health        = subject?.Health ?? 0,
-                    MaxHealth     = subject?.MaxHealth ?? 0,
+                    Health        = subject?.Combat.Health ?? 0,
+                    MaxHealth     = subject?.Combat.MaxHealth ?? 0,
 
                     // So someone riding into view is drawn mounted rather
                     // than on foot until they next get on or off.

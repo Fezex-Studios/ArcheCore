@@ -21,7 +21,7 @@ What changed for audit items H3–H5, M1–M5, M7 and M8, and what to know about
 
 `Core/Managers/MarketAccess.cs`.
 
-- **Opening the auction house or mailbox** through Interact records which NPC it was (`PlayerSession.MarketTargetId`).
+- **Opening the auction house or mailbox** through Interact records which NPC it was (`PlayerSession.Market.TargetId`).
 - **Every auction packet** (browse, create, buy, cancel) and **every mail claim** is checked against that NPC. It must still exist, still offer that action, and the player must be within its InteractRange + 2m.
 - **The cash shop is not gated.** It's the HUD button, usable anywhere as in ArcheAge. Its purchases arrive by mail, and mail is gated.
 

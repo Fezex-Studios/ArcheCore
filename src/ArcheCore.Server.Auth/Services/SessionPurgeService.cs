@@ -65,6 +65,13 @@ public sealed class SessionPurgeService : BackgroundService
 
             if (removed > 0)
                 _log.LogInformation("[DB] Purged {Count} expired session(s)", removed);
+
+            var refreshRemoved = await db.RefreshTokens
+                .Where(r => r.ExpiresAt < now)
+                .ExecuteDeleteAsync(ct);
+
+            if (refreshRemoved > 0)
+                _log.LogInformation("[DB] Purged {Count} expired refresh token(s)", refreshRemoved);
         }
         catch (Exception ex)
         {

@@ -31,6 +31,10 @@ public class WorldServer : IHostedService, INetEventListener
     private readonly NetworkConfig _network;
     private readonly IServiceScopeFactory _scopeFactory;
     private PacketDispatcher _packetDispatcher;
+    private ServiceContainer _services;
+    private Scheduler _scheduler;
+    private ArcheCore.Server.World.Core.Effects.EffectApplier _effectApplier;
+    private ArcheCore.Server.World.Core.Effects.EffectCatalog _effectCatalog;
     private readonly ArcheCore.Server.World.Networking.PacketRateLimiter _rateLimiter = new();
     private readonly GameDataPatchRunner _dataPatchRunner;
     private readonly IDbContextFactory<WorldDataDbContext> _dbFactory;
@@ -124,7 +128,11 @@ public class WorldServer : IHostedService, INetEventListener
         _persistenceClient = new PersistenceClient(_world);
         await _persistenceClient.Start();
 
-        // 2. Initialize managers
+        // 2. Build every manager (phase 1 of two-phase start-up).
+        //    Constructors take only what a manager needs to EXIST. Anything
+        //    it needs to TALK TO is looked up in Initialize (phase 2), so
+        //    the order of these lines is no longer load-bearing.
+        //
         // InterestManager is created here, not inside PlayerManager, because
         // SpawnManager needs the exact same instance - NPCs and players
         // share one grid (see SpawnManager.NpcIdBase).
@@ -134,11 +142,53 @@ public class WorldServer : IHostedService, INetEventListener
         _terrain = new WorldTerrainService(_world);
         _zones = new ZoneService(_world);
 
+        _scheduler = new Scheduler();
+
+        // What items and skills DO (roadmap fix-first #1): one catalog of
+        // effect lists, one applier that carries them out.
+        _effectCatalog = new ArcheCore.Server.World.Core.Effects.EffectCatalog(_dbFactory);
+        _effectApplier = new ArcheCore.Server.World.Core.Effects.EffectApplier();
         _replicationManager = new ReplicationManager();
         _interactions = new InteractionRegistry();
         _interestManager = new InterestManager();
         _spawnManager = new SpawnManager(_dbFactory, _interactions, _interestManager);
         _playerManager = new PlayerManager(_spawnManager, _replicationManager, _world, _persistenceClient, _demoManager, _interestManager, _itemManager, _terrain, _zones);
+
+        // NpcAiManager has no thread of its own - RunTickLoopAsync calls
+        // Tick() once per tick, on the same thread as everything else that
+        // touches InterestManager/SpatialGrid (neither is thread-safe).
+        _npcAiManager = new NpcAiManager(_spawnManager, _interestManager, _replicationManager, _playerManager);
+        _interactionActions = new InteractionActionCatalog(_dbFactory);
+        _harvestManager = new HarvestManager(
+            _dbFactory, _interactions, _interestManager, _spawnManager,
+            _itemManager, _playerManager, _replicationManager);
+        _shopManager = new ShopManager(_dbFactory, _itemManager, _playerManager, _spawnManager);
+        _lootManager = new LootManager(
+            _dbFactory, _itemManager, _playerManager, _spawnManager,
+            _interestManager, _interactions, _replicationManager);
+        _combatManager = new CombatManager(
+            _dbFactory, _playerManager, _spawnManager, _npcAiManager,
+            _lootManager, _harvestManager, _spawnPoints, _world, _interestManager, _replicationManager);
+        _mountManager = new MountManager(_dbFactory, _playerManager, _interestManager, _replicationManager);
+        _petManager = new PetManager(_playerManager, _spawnManager, _npcAiManager, _interestManager);
+
+        // The market. The auction house is its own service with its own
+        // database; the cash shop and the ONE general mailbox live on the
+        // persistence server. Everything a player receives from either -
+        // sale proceeds, purchases, unsold listings, gifts - arrives by mail.
+        _auctionClient = new AuctionClient(_world);
+        _mailManager = new MailManager(
+            _persistenceClient, _playerManager, _itemManager, _playerManager.EnqueueAction);
+        _auctionManager = new AuctionManager(
+            _auctionClient, _persistenceClient, _playerManager, _itemManager, _playerManager.EnqueueAction);
+        _cashShopManager = new CashShopManager(_persistenceClient, _playerManager.EnqueueAction);
+        _marketAccess = new MarketAccess(_interactions, _interactionActions);
+
+        // 3. Register everything, then wire it (phase 2): every
+        //    IInitializable looks up the managers it talks to.
+        _services = BuildServiceContainer();
+        _services.InitializeAll();
+
         _playerManager.InitializeScripts();
 
         // Derive the snapshot LOD tiers from the interest radii. Must run
@@ -162,76 +212,24 @@ public class WorldServer : IHostedService, INetEventListener
             _interestManager.SpawnRadius,
             _interestManager.DespawnRadius);
 
-        // NpcAiManager has no thread of its own - RunTickLoopAsync calls
-        // Tick() once per tick, on the same thread as everything else that
-        // touches InterestManager/SpatialGrid (neither is thread-safe).
-        _npcAiManager = new NpcAiManager(_spawnManager, _interestManager, _replicationManager, _playerManager);
-        if (_world.NpcGroundSnap)
-            _npcAiManager.SetTerrain(_terrain);
-
-        // 3. Load game data
-        // Quests: definitions first, then the runtime links. Initialize is
-        // what subscribes QuestManager to LuaEngine.EventFired - the hook
-        // that turns kills, harvests and conversations into progress.
+        // 3b. Load game data. Order matters HERE, and only here: quest
+        //     definitions, harvest nodes and shops check their item ids
+        //     against ItemManager, so items load first. The F/G actions load
+        //     before anything can spawn, because every spawn packet carries
+        //     its object's actions.
         _itemManager.LoadFromDatabase();
-
-        // After items: quest definitions check their Collect and reward item
-        // ids against ItemManager, and Initialize is what hands it over (as
-        // well as subscribing quests to LuaEngine.EventFired).
-        _questManager.Initialize(_playerManager, _itemManager, _spawnManager, _playerManager.LuaEngine);
         _questManager.LoadFromDatabase();
         await _spawnPoints.LoadAsync();
-
-        // F/G actions for every interactable. Loaded before anything can
-        // spawn, because every spawn packet carries its object's actions.
-        _interactionActions = new InteractionActionCatalog(_dbFactory);
         _interactionActions.LoadFromDatabase();
-
-        // Both check their item ids against ItemManager, so they load after it.
-        _harvestManager = new HarvestManager(
-            _dbFactory, _interactions, _interestManager, _spawnManager,
-            _itemManager, _playerManager, _replicationManager);
-        _shopManager = new ShopManager(_dbFactory, _itemManager, _playerManager, _spawnManager);
         _shopManager.LoadFromDatabase();
-
-        // Combat needs the NPC AI (deaths/respawns) and loot (corpses).
-        _lootManager = new LootManager(
-            _dbFactory, _itemManager, _playerManager, _spawnManager,
-            _interestManager, _interactions, _replicationManager);
         _lootManager.LoadFromDatabase();
-        _combatManager = new CombatManager(
-            _dbFactory, _playerManager, _spawnManager, _npcAiManager,
-            _lootManager, _harvestManager, _spawnPoints, _world, _interestManager, _replicationManager);
         _combatManager.LoadFromDatabase();
-
-        // Mounts and pets. PlayerManager reaches them through properties
-        // because using an ITEM is what triggers both, and PlayerManager was
-        // built long before either existed.
-        _mountManager = new MountManager(_dbFactory, _playerManager, _interestManager, _replicationManager);
         _mountManager.LoadFromDatabase();
-        _petManager = new PetManager(_playerManager, _spawnManager, _npcAiManager, _interestManager);
-        _playerManager.Mounts = _mountManager;
-        _playerManager.Pets = _petManager;
+        _effectCatalog.LoadFromDatabase();
 
-        // The market. The auction house is its own service with its own
-        // database; the cash shop and the ONE general mailbox live on the
-        // persistence server. Everything a player receives from either -
-        // sale proceeds, purchases, unsold listings, gifts - arrives by mail.
-        _auctionClient = new AuctionClient(_world);
-        _mailManager = new MailManager(
-            _persistenceClient, _playerManager, _itemManager, _playerManager.EnqueueAction);
-        _auctionManager = new AuctionManager(
-            _auctionClient, _persistenceClient, _playerManager, _itemManager, _playerManager.EnqueueAction);
-        _cashShopManager = new CashShopManager(_persistenceClient, _playerManager.EnqueueAction);
-        _marketAccess = new MarketAccess(_interactions, _interactionActions);
-
-        // The AI needs combat to hit players, combat needs the AI to kill
-        // NPCs - one has to be built first, so the link is made here.
-        _npcAiManager.SetCombat(_combatManager);
-
-        // 4. Register packets
+        // 4. Register packets - handlers are built from the same container.
         _packetDispatcher = new PacketDispatcher();
-        RegisterPackets();
+        _packetDispatcher.AutoRegister(_services.Resolve, typeof(WorldServer).Assembly);
 
         // 5. Start network
         // Separate reliable channels for world, bulk UI and chat (audit M4).
@@ -287,17 +285,16 @@ public class WorldServer : IHostedService, INetEventListener
                     // longer abort the rest of this block for everyone.
                     _server?.PollEvents();
 
+                    // Every timer in the game: corpse expiry, NPC and node
+                    // respawns, harvest completion, the auction sweep - and
+                    // in Phase 3, every buff and DoT (roadmap fix-first #2).
+                    _scheduler.RunDue();
+
                     // NPC wander AI + spawner activation (internally rate-limited).
                     _npcAiManager.Tick();
 
-                    // Harvest timers, move-to-cancel, node respawns.
+                    // Harvest move-to-cancel (completion and respawns are Scheduler callbacks).
                     _harvestManager.Tick();
-
-                    // Corpse expiry.
-                    _lootManager.Tick();
-
-                    // Expired listings go home by mail, about once a minute.
-                    _auctionManager.Tick();
 
                     // Unloads heightmaps nobody has stood on for a while.
                     _terrain.Tick();
@@ -356,11 +353,12 @@ public class WorldServer : IHostedService, INetEventListener
     }
 
     /// <summary>
-    /// Wires every [PacketOpcode]-tagged handler in this assembly into
-    /// _packetDispatcher automatically. ServiceContainer is the single
-    /// source of truth for every dependency a handler constructor can ask for.
+    /// Every long-lived singleton, registered once. Managers find each other
+    /// through it in IInitializable.Initialize (two-phase start-up), and
+    /// PacketDispatcher.AutoRegister builds every [PacketOpcode] handler from
+    /// it - so there is exactly one place any dependency can come from.
     /// </summary>
-    private void RegisterPackets()
+    private ServiceContainer BuildServiceContainer()
     {
         var services = new ServiceContainer();
         services.Register(_playerManager);
@@ -388,8 +386,14 @@ public class WorldServer : IHostedService, INetEventListener
         services.Register(_combatManager);
         services.Register(_terrain);
         services.Register(_zones);
+        services.Register(_scheduler);
+        services.Register(_effectCatalog);
+        services.Register(_effectApplier);
+        services.Register(_npcAiManager);
+        services.Register(_dbFactory);
+        services.Register(_playerManager.Persistence);
 
-        _packetDispatcher.AutoRegister(services.Resolve, typeof(WorldServer).Assembly);
+        return services;
     }
 
     public void OnPeerConnected(NetPeer peer)

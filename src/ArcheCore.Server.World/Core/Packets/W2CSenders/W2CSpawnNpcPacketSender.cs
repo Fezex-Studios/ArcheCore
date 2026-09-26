@@ -13,7 +13,8 @@ namespace ArcheCore.Server.World.Networking.W2C
         public static void Send(
             ReplicationManager replication,
             NetPeer peer,
-            NpcEntity npc)
+            NpcEntity npc,
+            InteractionActionData[] actions)
         {
             replication.Send(
                 Opcodes.SpawnNpc,
@@ -31,7 +32,7 @@ namespace ArcheCore.Server.World.Networking.W2C
                     Health        = npc.Health,
                     MaxHealth     = npc.MaxHealth,
                     Title         = npc.Title,
-                    Actions       = InteractionActionCatalog.ActionsFor(InteractableKind.Npc, npc.TemplateId)
+                    Actions       = actions
                 },
                 peer);
         }

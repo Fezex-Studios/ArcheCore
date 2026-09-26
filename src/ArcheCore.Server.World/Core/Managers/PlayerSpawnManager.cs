@@ -25,6 +25,10 @@ namespace ArcheCore.Server.World.Managers
         /// <summary>Sent in EnterWorld so the client can check its zone map copy. Set by PlayerManager.</summary>
         public string ZoneMapHash { get; set; } = "";
 
+        /// <summary>Set by PlayerManager.Initialize (two-phase start-up) - both are built after this.</summary>
+        internal PetManager Pets { get; set; }
+        internal QuestManager Quests { get; set; }
+
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
         private readonly SessionManager _sessions;
@@ -131,7 +135,7 @@ namespace ArcheCore.Server.World.Managers
             // A pet with no owner would stand in a field forever - nothing
             // else would ever clean it up, since no spawner owns it.
             if (peer.Tag is PlayerSession leaving)
-                PetManager.Current?.Dismiss(leaving);
+                Pets?.Dismiss(leaving);
 
             if (peer.Tag is not PlayerSession { NetworkId: int networkId } session)
                 return;
@@ -178,15 +182,15 @@ namespace ArcheCore.Server.World.Managers
             session.Level = character.Level;
 
             // Health isn't saved yet - everyone enters the world at full.
-            session.MaxHealth = ArcheCore.Server.World.Core.Combat.HealthRules.PlayerMaxHealth(session.Level);
-            session.Health = session.MaxHealth;
-            session.Gold = character.Gold;
+            session.Combat.MaxHealth = ArcheCore.Server.World.Core.Combat.HealthRules.PlayerMaxHealth(session.Level);
+            session.Combat.Health = session.Combat.MaxHealth;
+            session.Inventory.Gold = character.Gold;
 
             // Rebuild the dense 20-slot array from the persistence
             // server's sparse (occupied-slots-only) response. A new
             // character has Inventory == null (nothing created yet) -
             // treated the same as an empty array, not a null-ref.
-            session.Inventory = new InventorySlot[InventoryConstants.SlotCount];
+            System.Array.Clear(session.Inventory.Slots);
 
             if (character.Inventory != null)
             {
@@ -205,7 +209,7 @@ namespace ArcheCore.Server.World.Managers
                         continue;
                     }
 
-                    session.Inventory[dto.Slot] = new InventorySlot
+                    session.Inventory.Slots[dto.Slot] = new InventorySlot
                     {
                         ItemTemplateId = dto.ItemTemplateId,
                         Quantity       = dto.Quantity
@@ -250,10 +254,10 @@ namespace ArcheCore.Server.World.Managers
             W2CEnterWorldPacketSender.Send(
                 peer,
                 new CharacterData { Level = session.Level, Name = session.Name },
-                session.Gold,
-                session.Inventory,
-                session.Health,
-                session.MaxHealth,
+                session.Inventory.Gold,
+                session.Inventory.Slots,
+                session.Combat.Health,
+                session.Combat.MaxHealth,
                 new WorldSettingsData
                 {
                     ShardName             = _worldConfig.ShardName ?? "",
@@ -266,7 +270,7 @@ namespace ArcheCore.Server.World.Managers
             // Quest state arrives in the same load response as the inventory.
             // The catalogue and log follow EnterWorld, so the client has the
             // quest texts before it has any state to show with them.
-            var quests = QuestManager.Current;
+            var quests = Quests;
             if (quests != null)
             {
                 quests.LoadInto(session, character.Quests);
